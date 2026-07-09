@@ -1,0 +1,161 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Role {
+  OWNER   // Pet owner
+  SITTER  // Pet sitter
+  ADMIN
+}
+
+enum PetType {
+  DOG
+  CAT
+  BIRD
+  RABBIT
+  REPTILE
+  OTHER
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ServiceType {
+  BOARDING      // Sitter hosts pet overnight
+  HOUSE_SITTING // Sitter stays at owner's home
+  DROP_IN       // Sitter visits briefly
+  DOG_WALKING
+  DOGGY_DAY_CARE
+}
+
+// ─────────────────────────────────────────────
+// Core Models
+// ─────────────────────────────────────────────
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  firstName      String
+  lastName       String
+  phone          String?
+  avatarUrl      String?
+  role           Role     @default(OWNER)
+  emailVerified  Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  pets           Pet[]
+  sitterProfile  SitterProfile?
+  bookingsAsOwner Booking[]      @relation("OwnerBookings")
+  reviewsGiven   Review[]        @relation("ReviewsGiven")
+  reviewsReceived Review[]       @relation("ReviewsReceived")
+
+  @@map("users")
+}
+
+model Pet {
+  id          String   @id @default(cuid())
+  name        String
+  type        PetType
+  breed       String?
+  age         Int?
+  weightLbs   Float?
+  description String?
+  photoUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId     String
+  bookings    Booking[]
+
+  @@map("pets")
+}
+
+model SitterProfile {
+  id            String      @id @default(cuid())
+  bio           String?
+  hourlyRate    Float
+  serviceTypes  ServiceType[]
+  maxPets       Int         @default(2)
+  acceptsDogs   Boolean     @default(true)
+  acceptsCats   Boolean     @default(true)
+  city          String
+  state         String
+  zipCode       String
+  lat           Float?
+  lng           Float?
+  avgRating     Float?
+  totalReviews  Int         @default(0)
+  isAvailable   Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relations
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String      @unique
+  bookings      Booking[]
+
+  @@map("sitter_profiles")
+}
+
+model Booking {
+  id          String        @id @default(cuid())
+  status      BookingStatus @default(PENDING)
+  serviceType ServiceType
+  startDate   DateTime
+  endDate     DateTime
+  totalPrice  Float
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  owner       User          @relation("OwnerBookings", fields: [ownerId], references: [id])
+  ownerId     String
+  pet         Pet           @relation(fields: [petId], references: [id])
+  petId       String
+  sitter      SitterProfile @relation(fields: [sitterId], references: [id])
+  sitterId    String
+  review      Review?
+
+  @@map("bookings")
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  rating    Int      // 1–5
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  bookingId String   @unique
+  author    User     @relation("ReviewsGiven", fields: [authorId], references: [id])
+  authorId  String
+  subject   User     @relation("ReviewsReceived", fields: [subjectId], references: [id])
+  subjectId String
+
+  @@map("reviews")
+}
