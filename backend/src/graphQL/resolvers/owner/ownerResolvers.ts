@@ -8,8 +8,8 @@ export const ownerResolvers = {
         getOwner,
     },
     Mutation: {
-        ownerLogin,
+        // ownerLogin,
         ownerRegister,
-        ownerUpdate,
+        // ownerUpdate,
     },
 };

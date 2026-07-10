@@ -86,6 +86,7 @@ const typeDefs = `#graphql
 
   type Query {
     healthCheck: String
+    getOwner: User!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -97,6 +98,9 @@ const typeDefs = `#graphql
     # Creates a User + Business + BusinessMember(OWNER) in one transaction
     registerOwner(input: RegisterOwnerInput!): OwnerAuthPayload!
 
+    # Creates a User + Business + BusinessMember(OWNER) in one transaction
+    ownerRegister(input: RegisterOwnerInput!): OwnerAuthPayload!
+    
     # Works for all roles — returns a signed JWT
     login(input: LoginInput!): AuthPayload!
 
@@ -105,6 +109,7 @@ const typeDefs = `#graphql
 
     # Accepts an invitation token and creates the user account + BusinessMember
     acceptInvitation(input: AcceptInvitationInput!): AuthPayload!
+
   }
 `;
 
