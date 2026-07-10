@@ -3,14 +3,12 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
-import { PrismaClient } from '@prisma/client';
+import db from './utils/generatePrisma.js';
 import { verifyToken } from './utils/auth.js';
 import typeDefs from './graphQL/typeDefs.js';
 import resolvers from './graphQL/resolvers/index.js';
 
 dotenv.config();
-
-export const prisma = new PrismaClient();
 
 const startApolloServer = async () => {
     const app = express();
@@ -45,7 +43,7 @@ const startApolloServer = async () => {
     app.get('/health', async (_req, res) => {
         try {
             // Ping the database
-            await prisma.$queryRaw`SELECT 1`;
+            await db.$queryRaw`SELECT 1`;
             res.status(200).json({
                 status: 'ok',
                 timestamp: new Date().toISOString(),
@@ -79,7 +77,7 @@ const startApolloServer = async () => {
                 // Resolvers receive context.user — null means unauthenticated
                 const token = req.headers.authorization?.split(' ')[1] ?? null;
                 const user = token ? verifyToken(token) : null;
-                return { req, prisma, user };
+                return { req, prisma: db, user };
             },
         })
     );
