@@ -2,24 +2,9 @@ import { GraphQLError } from 'graphql';
 import crypto from 'crypto';
 import { inviteSchema, formatZodError } from '../../../../utils/validate.js';
 import type { GraphQLContext } from '../../../../types/context.js';
+import type { InviteInput } from '../../../../types/invitation.js';
 
 const INVITATION_EXPIRY_HOURS = 48;
-
-// ── Input Types ────────────────────────────────────────────────────────────
-
-export interface InviteInput {
-    email: string;
-    role: string;
-    businessId: string;
-}
-
-export interface AcceptInvitationInput {
-    token: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    phone?: string;
-}
 
 // ── Resolvers ──────────────────────────────────────────────────────────────
 

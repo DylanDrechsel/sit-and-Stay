@@ -2,31 +2,7 @@ import { GraphQLError } from 'graphql';
 import { hashPassword, signToken } from '../../../../utils/auth.js';
 import { registerCustomerSchema, formatZodError } from '../../../../utils/validate.js';
 import type { GraphQLContext } from '../../../../types/context.js';
-
-// ── Input Types ────────────────────────────────────────────────────────────
-
-export interface RegisterCustomerInput {
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    phone?: string;
-}
-
-export interface RegisterOwnerInput {
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    phone?: string;
-    businessName: string;
-    businessDescription?: string;
-}
-
-export interface LoginInput {
-    email: string;
-    password: string;
-}
+import type { RegisterCustomerInput } from '../../../../types/registration.js';
 
 // ── Resolvers ──────────────────────────────────────────────────────────────
 
@@ -44,7 +20,7 @@ export const registerCustomer = {
         ) => {
             // 1. Validate
             const parsed = registerCustomerSchema.safeParse(input);
-            if (!parsed.success) {
+            if (parsed.success === false) {
                 throw new GraphQLError(formatZodError(parsed.error), {
                     extensions: { code: 'BAD_USER_INPUT' },
                 });

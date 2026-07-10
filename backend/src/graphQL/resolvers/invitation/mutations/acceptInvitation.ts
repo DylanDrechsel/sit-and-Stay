@@ -2,22 +2,7 @@ import { GraphQLError } from 'graphql';
 import { hashPassword, signToken } from '../../../../utils/auth.js';
 import { acceptInvitationSchema, formatZodError } from '../../../../utils/validate.js';
 import type { GraphQLContext } from '../../../../types/context.js';
-
-// ── Input Types ────────────────────────────────────────────────────────────
-
-export interface InviteInput {
-    email: string;
-    role: string;
-    businessId: string;
-}
-
-export interface AcceptInvitationInput {
-    token: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    phone?: string;
-}
+import type { AcceptInvitationInput } from '../../../../types/invitation.js';
 
 // ── Resolvers ──────────────────────────────────────────────────────────────
 
