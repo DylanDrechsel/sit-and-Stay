@@ -2,7 +2,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const SALT_ROUNDS = 12;
-const JWT_EXPIRES_IN = '7d';
 
 // ── Password Helpers ───────────────────────────────────────────────────────
 
@@ -42,7 +41,8 @@ export interface TokenPayload {
 export const signToken = (payload: TokenPayload): string => {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET environment variable is not set');
-    return jwt.sign(payload, secret, { expiresIn: JWT_EXPIRES_IN });
+    const expiresIn = process.env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] | undefined;
+    return jwt.sign(payload, secret, expiresIn ? { expiresIn } : { expiresIn: '1d' });
 };
 
 /**
