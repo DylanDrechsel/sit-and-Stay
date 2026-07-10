@@ -78,6 +78,12 @@ pet_sitter_pro/
     │           │   └── mutations/
     │           │       ├── inviteEmployee.ts
     │           │       └── acceptInvitation.ts
+    │           ├── user/
+    │           │   ├── userResolvers.ts
+    │           │   ├── queries/
+    │           │   │   ├── getMe.ts
+    │           │   │   └── getUserById.ts
+    │           │   └── mutations/
     │           └── utils/
     │               ├── utilsResolvers.ts
     │               └── mutations/
@@ -493,10 +499,12 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 ### Current Queries
 
-| Query         | Args | Returns  | Auth Required | Location                          |
-|---------------|------|----------|---------------|-----------------------------------|
-| `healthCheck` | none | `String` | No            | `resolvers/index.ts`              |
-| `getOwner`    | none | `User!`  | Yes (JWT)     | `resolvers/owner/queries/getOwner.ts` |
+| Query         | Args            | Returns  | Auth Required | Location                               |
+|---------------|-----------------|----------|---------------|----------------------------------------|
+| `healthCheck` | none            | `String` | No            | `resolvers/index.ts`                   |
+| `getOwner`    | none            | `User!`  | Yes (JWT)     | `resolvers/owner/queries/getOwner.ts`  |
+| `getMe`       | none            | `User!`  | Yes (JWT)     | `resolvers/user/queries/getMe.ts`      |
+| `getUserById` | `userId: ID!`   | `User!`  | Yes (JWT)     | `resolvers/user/queries/getUserById.ts`|
 
 ### Current Mutations
 
