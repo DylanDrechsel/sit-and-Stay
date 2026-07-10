@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { ApolloServer } from '@apollo/server';
-import { expressMiddleware } from '@apollo/server/express4';
+import { expressMiddleware } from '@as-integrations/express5';
 import db from './utils/generatePrisma.js';
 import { verifyToken } from './utils/auth.js';
 import typeDefs from './graphQL/typeDefs.js';

@@ -1,24 +1,34 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import pg from 'pg';
 
-// Define the function that creates the client
+// 1. Create a single node-postgres pool outside the singleton
+const pool = new pg.Pool({ 
+  connectionString: process.env.DATABASE_URL 
+});
+const adapter = new PrismaPg(pool);
+
+// 2. Define the function that creates the client using the adapter
 const prismaClientSingleton = () => {
   return new PrismaClient({
+    adapter, // <-- Prisma 7 requires this driver adapter here
     log: ['info', 'warn'],
     errorFormat: 'pretty',
   });
 };
 
-// Check if we already have an instance on the global object
+// 3. Keep your global object type declaration exactly the same
 declare const globalThis: {
   prismaGlobal: ReturnType<typeof prismaClientSingleton>;
 } & typeof global;
 
-// Use the existing global instance, or create a new one if it doesn't exist
+// 4. Reuse or create the global instance
 const db = globalThis.prismaGlobal ?? prismaClientSingleton();
 
 export default db;
 
-// In development, save the instance to the global object so it survives hot-reloads
+// 5. Save it to globalThis in development to survive hot-reloads
 if (process.env.NODE_ENV !== 'production') {
   globalThis.prismaGlobal = db;
 }
