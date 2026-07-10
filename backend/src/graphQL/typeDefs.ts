@@ -87,6 +87,12 @@ const typeDefs = `#graphql
   type Query {
     healthCheck: String
     getOwner: User!
+
+    # Returns the currently authenticated user (requires JWT)
+    getMe: User!
+
+    # Looks up any user by their UUID (requires JWT)
+    getUserById(userId: ID!): User!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
