@@ -1,5 +1,4 @@
-import { ownerRegister } from './mutations/ownerRegister.js';
-import { ownerUpdate } from './mutations/ownerUpdate.js';
+import { registerOwner } from './mutations/registerOwner.js';
 import { getOwner } from './queries/getOwner.js';
 
 export const ownerResolvers = {
@@ -7,7 +6,6 @@ export const ownerResolvers = {
         getOwner,
     },
     Mutation: {
-        ownerRegister,
-        // ownerUpdate,
+        registerOwner,
     },
 };
