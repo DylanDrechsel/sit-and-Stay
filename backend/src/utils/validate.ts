@@ -3,10 +3,13 @@ import { z } from 'zod';
 // ── Reusable field schemas ─────────────────────────────────────────────────
 
 const emailField = z.string().min(1, 'Email is required').email('Invalid email address');
-const passwordField = z.string().min(8, 'Password must be at least 8 characters');
+const passwordField = z.string().min(8, 'Password must be at least 8 characters')
+  .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+  .regex(/[0-9]/, 'Password must contain at least one number')
+  .regex(/[^a-zA-Z0-9]/, 'Password must contain at least one special character')
 const firstNameField = z.string().min(1, 'First name is required').max(50, 'First name too long');
 const lastNameField = z.string().min(1, 'Last name is required').max(50, 'Last name too long');
-const phoneField = z.string().regex(/^\+?[0-9\s\-().]{7,20}$/, 'Invalid phone number').optional();
+const phoneField = z.string().regex(/^\+?[0-9\s\-().]{7,20}$/, 'Invalid phone number');
 
 // ── Auth schemas ───────────────────────────────────────────────────────────
 
