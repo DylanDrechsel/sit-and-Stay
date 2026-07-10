@@ -2,6 +2,7 @@ import GraphQLJSON from 'graphql-type-json';
 import { invitationResolvers } from './invitation/invitationResolvers.js';
 import { ownerResolvers } from './owner/ownerResolvers.js';
 import { customerResolvers } from './customer/customerResolvers.js';
+import { utilsResolvers } from './utils/utilsResolvers.js';
 
 export default {
     Query: {
@@ -12,6 +13,7 @@ export default {
         ...invitationResolvers.Mutation,
         ...ownerResolvers.Mutation,
         ...customerResolvers.Mutation,
+        ...utilsResolvers.Mutation,
     },
     JSON: GraphQLJSON,
 };

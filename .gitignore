@@ -6,8 +6,6 @@ node_modules/
 .env.local
 .env.*.local
 
-# ── AI Manifest (local context doc, not for repo) ──
-AI_MANIFEST.md
 
 # ── Build output ──────────────────────────────
 dist/
