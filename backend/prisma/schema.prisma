@@ -1,23 +1,27 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
 }
 
-// ─────────────────────────────────────────────
-// Enums
-// ─────────────────────────────────────────────
+// ----------------------------------------------------------------------
+// ENUMS
+// ----------------------------------------------------------------------
 
-enum Role {
-  OWNER   // Pet owner
-  SITTER  // Pet sitter
+enum GlobalRole {
   ADMIN
+  USER
+}
+
+enum BusinessRole {
+  OWNER
+  MANAGER
+  EMPLOYEE
 }
 
 enum PetType {
@@ -29,133 +33,288 @@ enum PetType {
   OTHER
 }
 
-enum BookingStatus {
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum JobStatus {
   PENDING
-  CONFIRMED
+  ACCEPTED
+  ASSIGNED
   IN_PROGRESS
   COMPLETED
   CANCELLED
 }
 
-enum ServiceType {
-  BOARDING      // Sitter hosts pet overnight
-  HOUSE_SITTING // Sitter stays at owner's home
-  DROP_IN       // Sitter visits briefly
-  DOG_WALKING
-  DOGGY_DAY_CARE
+enum EntryType {
+  CREDIT
+  DEBIT
 }
 
-// ─────────────────────────────────────────────
-// Core Models
-// ─────────────────────────────────────────────
+enum LedgerReferenceType {
+  JOB_PAYMENT
+  TIP
+  PAYOUT
+  REFUND
+  ADJUSTMENT
+}
+
+// ----------------------------------------------------------------------
+// CORE IDENTITY & MULTI-TENANCY
+// ----------------------------------------------------------------------
 
 model User {
-  id             String   @id @default(cuid())
-  email          String   @unique
-  passwordHash   String
-  firstName      String
-  lastName       String
-  phone          String?
-  avatarUrl      String?
-  role           Role     @default(OWNER)
-  emailVerified  Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String           @id @default(uuid())
+  email         String           @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  phone         String?
+  avatarUrl     String?
+  globalRole    GlobalRole       @default(USER)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
-  // Relations
-  pets           Pet[]
-  sitterProfile  SitterProfile?
-  bookingsAsOwner Booking[]      @relation("OwnerBookings")
-  reviewsGiven   Review[]        @relation("ReviewsGiven")
-  reviewsReceived Review[]       @relation("ReviewsReceived")
+  memberships   BusinessMember[]
+  customer      CustomerProfile?
+  messages      Message[]
+}
 
-  @@map("users")
+model Business {
+  id            String             @id @default(uuid())
+  name          String
+  description   String?
+  isActive      Boolean            @default(true)
+
+  // Geospatial Data via PostGIS
+  location      Unsupported("geometry(Point, 4326)")?
+
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  members       BusinessMember[]
+  offerings     ServiceOffering[]
+  jobs          Job[]
+  ledgerEntries LedgerEntry[]
+  reviews       Review[]
+  invitations   Invitation[]
+  conversations Conversation[]
+
+  @@index([isActive])
+  @@index([location], name: "business_location_idx", type: Gist)
+}
+
+model BusinessMember {
+  id            String                 @id @default(uuid())
+  userId        String
+  businessId    String
+  role          BusinessRole
+  joinedAt      DateTime               @default(now())
+
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business      Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  availability  EmployeeAvailability[]
+  assignedJobs  Job[]                  @relation("JobAssignee")
+  conversations Conversation[]
+
+  // Ensure a user has only one role per business
+  @@unique([userId, businessId])
+  @@index([businessId])
+}
+
+model Invitation {
+  id         String       @id @default(uuid())
+  businessId String
+  email      String
+  role       BusinessRole
+  token      String       @unique
+  expiresAt  DateTime
+  isAccepted Boolean      @default(false)
+
+  business   Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+// ----------------------------------------------------------------------
+// CUSTOMER & PET DATA
+// ----------------------------------------------------------------------
+
+model CustomerProfile {
+  id            String    @id @default(uuid())
+  userId        String    @unique
+  address       String?
+
+  // Geospatial Data via PostGIS
+  location      Unsupported("geometry(Point, 4326)")?
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pets          Pet[]
+  jobs          Job[]
+  reviews       Review[]
+  conversations Conversation[]
+
+  @@index([location], name: "customer_location_idx", type: Gist)
 }
 
 model Pet {
-  id          String   @id @default(cuid())
-  name        String
-  type        PetType
-  breed       String?
-  age         Int?
-  weightLbs   Float?
-  description String?
-  photoUrl    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String          @id @default(uuid())
+  customerId       String
+  name             String
+  type             PetType
+  breed            String?
+  age              Int?
+  medicalNotes     String?
+  careInstructions String?
 
-  // Relations
-  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  ownerId     String
-  bookings    Booking[]
-
-  @@map("pets")
+  customer         CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  jobs             Job[]           @relation("JobPets")
 }
 
-model SitterProfile {
-  id            String      @id @default(cuid())
-  bio           String?
-  hourlyRate    Float
-  serviceTypes  ServiceType[]
-  maxPets       Int         @default(2)
-  acceptsDogs   Boolean     @default(true)
-  acceptsCats   Boolean     @default(true)
-  city          String
-  state         String
-  zipCode       String
-  lat           Float?
-  lng           Float?
-  avgRating     Float?
-  totalReviews  Int         @default(0)
-  isAvailable   Boolean     @default(true)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+// ----------------------------------------------------------------------
+// SERVICES, SCHEDULING & OPERATIONS
+// ----------------------------------------------------------------------
 
-  // Relations
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId        String      @unique
-  bookings      Booking[]
+model ServiceOffering {
+  id              String   @id @default(uuid())
+  businessId      String
+  title           String
+  description     String
+  basePrice       Decimal  @db.Decimal(10, 2)
+  durationMinutes Int
+  isActive        Boolean  @default(true)
 
-  @@map("sitter_profiles")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  jobs            Job[]
 }
 
-model Booking {
-  id          String        @id @default(cuid())
-  status      BookingStatus @default(PENDING)
-  serviceType ServiceType
-  startDate   DateTime
-  endDate     DateTime
-  totalPrice  Float
-  notes       String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+model EmployeeAvailability {
+  id          String         @id @default(uuid())
+  employeeId  String
+  dayOfWeek   DayOfWeek
+  startTime   String         // Encoded as HH:MM
+  endTime     String         // Encoded as HH:MM
+  isAvailable Boolean        @default(true)
 
-  // Relations
-  owner       User          @relation("OwnerBookings", fields: [ownerId], references: [id])
-  ownerId     String
-  pet         Pet           @relation(fields: [petId], references: [id])
-  petId       String
-  sitter      SitterProfile @relation(fields: [sitterId], references: [id])
-  sitterId    String
-  review      Review?
+  employee    BusinessMember @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
-  @@map("bookings")
+  @@unique([employeeId, dayOfWeek])
+}
+
+model Job {
+  id                  String          @id @default(uuid())
+  businessId          String
+  customerId          String
+  serviceOfferingId   String
+  assigneeId          String?
+
+  status              JobStatus       @default(PENDING)
+  scheduledStartTime  DateTime
+  scheduledEndTime    DateTime
+  actualStartTime     DateTime?
+  actualEndTime       DateTime?
+  specialInstructions String?
+
+  price               Decimal         @db.Decimal(10, 2)
+  tipAmount           Decimal?        @db.Decimal(10, 2)
+
+  business            Business        @relation(fields: [businessId], references: [id])
+  customer            CustomerProfile @relation(fields: [customerId], references: [id])
+  service             ServiceOffering @relation(fields: [serviceOfferingId], references: [id])
+  assignee            BusinessMember? @relation("JobAssignee", fields: [assigneeId], references: [id])
+  pets                Pet[]           @relation("JobPets")
+  ledgerEntries       LedgerEntry[]
+  review              Review?
+  conversation        Conversation?
+
+  @@index([businessId])
+  @@index([customerId])
 }
 
 model Review {
-  id        String   @id @default(cuid())
-  rating    Int      // 1–5
-  comment   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String          @id @default(uuid())
+  jobId      String          @unique
+  businessId String
+  customerId String
+  rating     Int             // 1 to 5 scale
+  comment    String?
+  createdAt  DateTime        @default(now())
 
-  // Relations
-  booking   Booking  @relation(fields: [bookingId], references: [id])
-  bookingId String   @unique
-  author    User     @relation("ReviewsGiven", fields: [authorId], references: [id])
-  authorId  String
-  subject   User     @relation("ReviewsReceived", fields: [subjectId], references: [id])
-  subjectId String
+  job        Job             @relation(fields: [jobId], references: [id])
+  business   Business        @relation(fields: [businessId], references: [id])
+  customer   CustomerProfile @relation(fields: [customerId], references: [id])
 
-  @@map("reviews")
+  @@index([businessId, rating])
+}
+
+// ----------------------------------------------------------------------
+// FINANCIAL LEDGER
+// ----------------------------------------------------------------------
+
+model LedgerEntry {
+  id            String              @id @default(uuid())
+  businessId    String
+  jobId         String?
+  entryType     EntryType
+  amount        Decimal             @db.Decimal(10, 2)
+  balanceAfter  Decimal             @db.Decimal(10, 2)
+  currency      String              @default("USD")
+  referenceType LedgerReferenceType
+  description   String?
+  createdAt     DateTime            @default(now())
+
+  business      Business            @relation(fields: [businessId], references: [id])
+  job           Job?                @relation(fields: [jobId], references: [id])
+
+  @@index([businessId, createdAt(sort: Desc)])
+}
+
+// ----------------------------------------------------------------------
+// MESSAGING & COMMUNICATIONS
+// ----------------------------------------------------------------------
+// A Conversation is always anchored to a Business and has exactly ONE
+// of the following participants on the other side:
+//   - customerId set  → Owner ↔ Customer conversation
+//   - memberId set    → Owner ↔ Employee (BusinessMember) conversation
+// The jobId is optional and links a conversation to a specific job.
+
+model Conversation {
+  id         String           @id @default(uuid())
+  jobId      String?          @unique  // optionally linked to a job
+  businessId String
+  customerId String?          // set for Owner ↔ Customer
+  memberId   String?          // set for Owner ↔ Employee
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  business   Business         @relation(fields: [businessId], references: [id])
+  customer   CustomerProfile? @relation(fields: [customerId], references: [id])
+  member     BusinessMember?  @relation(fields: [memberId], references: [id])
+  job        Job?             @relation(fields: [jobId], references: [id])
+  messages   Message[]
+
+  @@index([businessId])
+  @@index([customerId])
+  @@index([memberId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String       @db.Text
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id])
+
+  // Composite index for rapid cursor-based pagination
+  @@index([conversationId, createdAt(sort: Desc)])
 }

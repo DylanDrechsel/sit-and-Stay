@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import { PrismaClient } from '@prisma/client';
+import { verifyToken } from './utils/auth.js';
 import typeDefs from './graphQL/typeDefs.js';
 import resolvers from './graphQL/resolvers/index.js';
 
@@ -73,7 +74,13 @@ const startApolloServer = async () => {
     app.use(
         '/graphql',
         expressMiddleware(server, {
-            context: async ({ req }) => ({ req, prisma }),
+            context: async ({ req }) => {
+                // Decode JWT from Authorization header if present
+                // Resolvers receive context.user — null means unauthenticated
+                const token = req.headers.authorization?.split(' ')[1] ?? null;
+                const user = token ? verifyToken(token) : null;
+                return { req, prisma, user };
+            },
         })
     );
 
