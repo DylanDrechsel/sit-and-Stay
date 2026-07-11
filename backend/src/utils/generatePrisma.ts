@@ -12,7 +12,7 @@ const adapter = new PrismaPg(pool);
 // 2. Define the function that creates the client using the adapter
 const prismaClientSingleton = () => {
   return new PrismaClient({
-    adapter, // <-- Prisma 7 requires this driver adapter here
+    adapter,
     log: ['info', 'warn'],
     errorFormat: 'pretty',
   });

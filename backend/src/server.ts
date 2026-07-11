@@ -42,7 +42,6 @@ const startApolloServer = async () => {
     // ── REST: Health Check ────────────────────────────────────────────
     app.get('/health', async (_req, res) => {
         try {
-            // Ping the database
             await db.$queryRaw`SELECT 1`;
             res.status(200).json({
                 status: 'ok',

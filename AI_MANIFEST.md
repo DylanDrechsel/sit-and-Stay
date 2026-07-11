@@ -48,6 +48,7 @@ pet_sitter_pro/
     ├── prisma/
     │   ├── schema.prisma          # Single source of truth for all DB models
     │   └── migrations/            # Prisma migration history (committed to git)
+    ├── prisma.config.ts           # Prisma CLI config (points to schema.prisma)
     ├── src/
     │   ├── server.ts              # Entry point — Express + Apollo setup
     │   ├── types/                 # Shared TypeScript interfaces
@@ -56,7 +57,7 @@ pet_sitter_pro/
     │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput
     │   │   └── registration.ts    # RegisterCustomerInput, RegisterOwnerInput
     │   ├── utils/
-    │   │   ├── generatePrisma.ts  # Prisma singleton (prevents hot-reload connection exhaustion)
+    │   │   ├── generatePrisma.ts  # Prisma singleton using pg.Pool + PrismaPg adapter
     │   │   ├── auth.ts            # hashPassword, comparePassword, signToken, verifyToken, TokenPayload
     │   │   └── validate.ts        # Zod schemas for all inputs + formatZodError helper
     │   └── graphQL/
@@ -155,15 +156,32 @@ The database persists data in a Docker named volume (`pgdata`) so data survives 
 ## 7. Database Connection (`src/utils/generatePrisma.ts`)
 
 **What it does:**
-- Implements the **Singleton Pattern** for the `PrismaClient`.
+- Implements the **Singleton Pattern** for the `PrismaClient` using the Prisma driver adapter API.
+- Uses a **`pg.Pool`** (node-postgres) created from `DATABASE_URL`, wrapped in a **`PrismaPg`** adapter (`@prisma/adapter-pg`).
+- The adapter is passed directly to `new PrismaClient({ adapter })` — this is the recommended approach for using Prisma with a connection pool.
 - Attaches the Prisma instance to the Node.js `globalThis` object during local development.
 - Prevents database connection exhaustion (the "Too many connections" error) caused by the server hot-reloading on every file save.
 - Logs `info` and `warn` level events; uses `pretty` error format.
+
+**Implementation overview:**
+```ts
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prismaClientSingleton = () => new PrismaClient({ adapter, log: ['info', 'warn'], errorFormat: 'pretty' });
+
+const db = globalThis.prismaGlobal ?? prismaClientSingleton();
+if (process.env.NODE_ENV !== 'production') globalThis.prismaGlobal = db;
+
+export default db;
+```
 
 **Exported values:**
 ```ts
 export default db  // Import this if you need DB access outside of GraphQL resolvers (e.g., utility scripts)
 ```
+
+> ⚠️ Because Prisma is initialized with a driver adapter, the `postgresqlExtensions` preview feature
+> must remain in `schema.prisma` and `prisma.config.ts` must point to the correct schema path.
 
 ---
 

@@ -34,7 +34,8 @@ export interface TokenPayload {
 
 /**
  * Signs a JWT token containing the user's core identity.
- * Expires in 7 days. Secret is pulled from JWT_SECRET env var.
+ * Default expiry is 1 day (`1d`); override with the `JWT_EXPIRES_IN` env var.
+ * Secret is pulled from `JWT_SECRET` env var.
  * @param payload - User identity fields to encode
  * @returns Signed JWT string
  */
