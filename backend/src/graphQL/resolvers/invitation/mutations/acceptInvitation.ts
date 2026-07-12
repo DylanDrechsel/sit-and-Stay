@@ -6,19 +6,29 @@ import type { AcceptInvitationInput } from '../../../../types/invitation.js';
 
 /**
  * acceptInvitation
- * Validates a token and creates the user account + BusinessMember record.
- * Handles two cases:
- *   1. Invitee does not have an account — creates a new User
- *   2. Invitee already has an account — links it to the business (no new User created)
  *
- * Returns a signed JWT so the user is immediately logged in after accepting.
+ * Validates a secure invitation token and links the user to the business.
+ * Handles two distinct paths:
+ *
+ *   PATH A — New user:
+ *     The invited email has no existing account.
+ *     Requires: password, firstName, lastName (phone is optional).
+ *     Creates a new User + BusinessMember record in one atomic transaction.
+ *
+ *   PATH B — Existing user:
+ *     The invited email already has an account (e.g. they're a customer on the platform).
+ *     Only the token is needed — profile fields are ignored.
+ *     Creates only the BusinessMember record linking them to the new business.
+ *
+ * In both paths the invitation is marked as accepted and a signed JWT is returned
+ * so the user is immediately logged in.
  */
 export const acceptInvitation = async (
     _: unknown,
     { input }: { input: AcceptInvitationInput },
     context: GraphQLContext,
 ) => {
-    // 1. Validate input
+    // 1. Validate the raw input shape (token required; profile fields optional here)
     const parsed = acceptInvitationSchema.safeParse(input);
     if (parsed.success === false) {
         throw new GraphQLError(formatZodError(parsed.error), {
@@ -28,39 +38,46 @@ export const acceptInvitation = async (
 
     const { token, password, firstName, lastName, phone } = parsed.data;
 
-    // 2. Find and validate the invitation
+    // 2. Look up and validate the invitation token
     const invitation = await context.prisma.invitation.findUnique({ where: { token } });
 
     if (invitation == null) {
-        throw new GraphQLError('Invalid invitation token', {
+        throw new GraphQLError('Invalid invitation token.', {
             extensions: { code: 'BAD_USER_INPUT' },
         });
     }
 
     if (invitation.isAccepted) {
-        throw new GraphQLError('This invitation has already been used', {
+        throw new GraphQLError('This invitation has already been used.', {
             extensions: { code: 'BAD_USER_INPUT' },
         });
     }
 
     if (new Date() > invitation.expiresAt) {
-        throw new GraphQLError('This invitation has expired. Please ask for a new one', {
+        throw new GraphQLError('This invitation has expired. Please ask for a new one.', {
             extensions: { code: 'BAD_USER_INPUT' },
         });
     }
 
-    // 3. Create/find User + create BusinessMember + mark invitation accepted — all atomic
-    const passwordHash = await hashPassword(password);
+    // 3. Check whether the invitee's email already has an account
+    const existingUser = await context.prisma.user.findUnique({
+        where: { email: invitation.email },
+    });
 
-    // $transaction ensures that either all operations succeed or none do, preventing partial updates
-    const user = await context.prisma.$transaction(async (tx) => {
-        // Check if the invited email already has an account
-        let existingUser = await tx.user.findUnique({
-            where: { email: invitation.email },
-        });
+    // 4. PATH A — New user: enforce required registration fields
+    if (existingUser == null) {
+        if (!password || !firstName || !lastName) {
+            throw new GraphQLError(
+                'Password, first name, and last name are required to create your account.',
+                { extensions: { code: 'BAD_USER_INPUT' } },
+            );
+        }
 
-        if (existingUser == null) {
-            existingUser = await tx.user.create({
+        const passwordHash = await hashPassword(password);
+
+        const newUser = await context.prisma.$transaction(async (tx) => {
+            // Create the user account
+            const user = await tx.user.create({
                 data: {
                     email: invitation.email,
                     passwordHash,
@@ -70,9 +87,53 @@ export const acceptInvitation = async (
                     globalRole: 'USER',
                 },
             });
-        }
 
-        // Link the user to the business with their assigned role
+            // Link user to the business with the invited role
+            await tx.businessMember.create({
+                data: {
+                    userId: user.id,
+                    businessId: invitation.businessId,
+                    role: invitation.role,
+                },
+            });
+
+            // Mark the invitation as consumed
+            await tx.invitation.update({
+                where: { id: invitation.id },
+                data: { isAccepted: true },
+            });
+
+            return user;
+        });
+
+        const jwtToken = signToken({
+            userId: newUser.id,
+            email: newUser.email,
+            globalRole: newUser.globalRole,
+        });
+
+        return { token: jwtToken, user: newUser };
+    }
+
+    // 5. PATH B — Existing user: check they're not already a member of this business
+    const alreadyMember = await context.prisma.businessMember.findUnique({
+        where: {
+            userId_businessId: {
+                userId: existingUser.id,
+                businessId: invitation.businessId,
+            },
+        },
+    });
+
+    if (alreadyMember != null) {
+        throw new GraphQLError(
+            'You are already a member of this business.',
+            { extensions: { code: 'BAD_USER_INPUT' } },
+        );
+    }
+
+    // Link the existing user to the business + mark invitation accepted atomically
+    await context.prisma.$transaction(async (tx) => {
         await tx.businessMember.create({
             data: {
                 userId: existingUser.id,
@@ -81,15 +142,17 @@ export const acceptInvitation = async (
             },
         });
 
-        // Mark invitation as accepted so it can't be reused
         await tx.invitation.update({
             where: { id: invitation.id },
             data: { isAccepted: true },
         });
-
-        return existingUser;
     });
 
-    const jwtToken = signToken({ userId: user.id, email: user.email, globalRole: user.globalRole });
-    return { token: jwtToken, user };
+    const jwtToken = signToken({
+        userId: existingUser.id,
+        email: existingUser.email,
+        globalRole: existingUser.globalRole,
+    });
+
+    return { token: jwtToken, user: existingUser };
 };

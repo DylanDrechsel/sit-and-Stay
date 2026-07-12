@@ -1,6 +1,7 @@
 import { GraphQLError } from 'graphql';
 import crypto from 'crypto';
 import { inviteSchema, formatZodError } from '../../../../utils/validate.js';
+import { sendInvitationEmail } from '../../../../utils/email.js';
 import type { GraphQLContext } from '../../../../types/context.js';
 import type { InviteInput } from '../../../../types/invitation.js';
 
@@ -18,6 +19,7 @@ const INVITATION_EXPIRY_HOURS = 48;
  * The invitation token is currently logged to the console.
  * Replace the console.log with Nodemailer when email is set up.
  */
+
 export const inviteEmployee = async (
     _: unknown,
     { input }: { input: InviteInput },
@@ -40,16 +42,28 @@ export const inviteEmployee = async (
 
     const { email, role, businessId } = parsed.data;
 
-    // 3. Check caller's role in the business
-    const membership = await context.prisma.businessMember.findUnique({
-        where: {
-            userId_businessId: { userId: context.user.userId, businessId },
-        },
-    });
+    // 3. Check caller's role in the business + fetch business name in one query
+    const [membership, business] = await Promise.all([
+        context.prisma.businessMember.findUnique({
+            where: {
+                userId_businessId: { userId: context.user.userId, businessId },
+            },
+        }),
+        context.prisma.business.findUnique({
+            where: { id: businessId },
+            select: { name: true },
+        }),
+    ]);
 
     if (membership == null || !['OWNER', 'MANAGER'].includes(membership.role)) {
         throw new GraphQLError('You do not have permission to invite members to this business', {
             extensions: { code: 'FORBIDDEN' },
+        });
+    }
+
+    if (business == null) {
+        throw new GraphQLError('Business not found', {
+            extensions: { code: 'NOT_FOUND' },
         });
     }
 
@@ -64,7 +78,7 @@ export const inviteEmployee = async (
     const existingInvite = await context.prisma.invitation.findFirst({
         where: { email, businessId, isAccepted: false },
     });
-    if (existingInvite != null) {
+    if (existingInvite) {
         throw new GraphQLError('A pending invitation already exists for this email address', {
             extensions: { code: 'BAD_USER_INPUT' },
         });
@@ -84,10 +98,14 @@ export const inviteEmployee = async (
         },
     });
 
-    // TODO: Replace with Nodemailer — send email containing the token link
-    console.log(`\n📧  Invitation for ${email} (${role})`);
-    console.log(`    Token: ${token}`);
-    console.log(`    Expires: ${expiresAt.toISOString()}\n`);
+    // 7. Send invitation email (falls back to console.log in dev if SMTP is not configured)
+    await sendInvitationEmail({
+        toEmail: email,
+        businessName: business.name,
+        role,
+        token,
+        expiresAt,
+    });
 
     return invitation;
 };

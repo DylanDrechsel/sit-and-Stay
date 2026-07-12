@@ -9,8 +9,17 @@ export interface InviteInput {
 
 export interface AcceptInvitationInput {
     token: string;
-    password: string;
-    firstName: string;
-    lastName: string;
+    // Required for new users (no existing account); ignored for existing users
+    password?: string;
+    firstName?: string;
+    lastName?: string;
     phone?: string;
+}
+
+export interface InvitationEmailPayload {
+    toEmail: string;
+    businessName: string;
+    role: string;          // 'MANAGER' | 'EMPLOYEE'
+    token: string;
+    expiresAt: Date;
 }
