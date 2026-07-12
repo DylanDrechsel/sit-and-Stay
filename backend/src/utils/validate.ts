@@ -60,8 +60,8 @@ export const loginSchema = z.object({
  */
 export const inviteSchema = z.object({
     email: emailField,
-    role: z.enum(['MANAGER', 'EMPLOYEE'], {
-        errorMap: () => ({ message: 'Role must be MANAGER or EMPLOYEE' }),
+    role: z.string().refine((value) => value === 'MANAGER' || value === 'EMPLOYEE', {
+        message: 'Role must be MANAGER or EMPLOYEE',
     }),
     businessId: z.string().min(1, 'Business ID is required'),
 });
@@ -166,5 +166,9 @@ export const removeMemberSchema = z.object({
  * @returns Comma-separated list of validation messages
  */
 export const formatZodError = (error: z.ZodError): string => {
-    return error.errors.map(e => e.message).join(', ');
+    const issues = Array.isArray((error as z.ZodError & { issues?: z.ZodIssue[] }).issues)
+        ? (error as z.ZodError & { issues?: z.ZodIssue[] }).issues!
+        : ((error as z.ZodError & { errors?: z.ZodIssue[] }).errors ?? []);
+
+    return issues.map((issue) => issue.message).join(', ');
 };

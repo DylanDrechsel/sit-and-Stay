@@ -307,6 +307,154 @@ query GetMyBusinesses {
 | Business ID | `debef9dc-8bab-4196-847f-655f7d687a42`     |
 ---
 
+## 6. Get Business Members (getBusinessMembers) --> **JWT Required**
+
+### Input
+
+```graphql
+query GetBusinessMembers($businessId: ID!) {
+  getBusinessMembers(businessId: $businessId) {
+    id
+    role
+    isActive
+    joinedAt
+    user {
+      id
+      email
+      firstName
+      lastName
+      phone
+      avatarUrl
+      globalRole
+      createdAt
+    }
+  }
+}
+```
+
+**Variables:**
+```json
+{
+  "businessId": "debef9dc-8bab-4196-847f-655f7d687a42"
+}
+```
+
+### Response
+
+```json
+{
+  "data": {
+    "getBusinessMembers": [
+      {
+        "id": "186405cd-2b56-44e2-859f-6495a200ecb8",
+        "role": "OWNER",
+        "isActive": true,
+        "joinedAt": "1783875038112",
+        "user": {
+          "id": "22a9cee2-ecd5-4cd1-8359-38b67ced3f5d",
+          "email": "sarahjenkins@pawsandpalms.com",
+          "firstName": "Sarah",
+          "lastName": "Jenkins",
+          "phone": "+15558675309",
+          "avatarUrl": null,
+          "globalRole": "USER",
+          "createdAt": "1783875038104"
+        }
+      }
+    ]
+  }
+}
+```
+
+### Key IDs
+
+| Field         | Value                                      |
+|---------------|--------------------------------------------|
+| Business ID   | `debef9dc-8bab-4196-847f-655f7d687a42`     |
+| Membership ID | `186405cd-2b56-44e2-859f-6495a200ecb8`     |
+| User ID       | `22a9cee2-ecd5-4cd1-8359-38b67ced3f5d`     |
+---
+
+## 7. Get Inactive Business Members (getInactiveBusinessMembers) --> **JWT Required**
+
+### Input
+
+```graphql
+query GetBusinessMembers($businessId: ID!) {
+  getInactiveBusinessMembers(businessId: $businessId) {
+    id
+    isActive
+    joinedAt
+    role
+    user {
+      id
+      email
+      firstName
+      lastName
+      phone
+      avatarUrl
+      globalRole
+      createdAt
+    }
+  }
+}
+```
+
+**Variables:**
+```json
+{
+  "businessId": "debef9dc-8bab-4196-847f-655f7d687a42"
+}
+```
+
+### Response --> When Business has Inactive Users (NEED TO UPDATE)
+
+```json
+{
+  "data": {
+    "getInactiveBusinessMembers": []
+  }
+}
+
+### Response --> When Business has NO Inactive Users
+
+```json
+{
+  "data": {
+    "getInactiveBusinessMembers": []
+  }
+}
+```
+
+### Key IDs
+
+| Field       | Value                                      |
+|-------------|--------------------------------------------|
+| Business ID | `debef9dc-8bab-4196-847f-655f7d687a42`     |
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <!--
 ================================================================
   TEMPLATE — Copy this block when adding a new test entry
