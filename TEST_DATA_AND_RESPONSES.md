@@ -11,7 +11,7 @@
 
 | Role  | Name        | Email                           | Business          | User ID                                |
 |-------|-------------|---------------------------------|-------------------|----------------------------------------|
-| OWNER | Alex Morgan | alex.morgan@bitesizebakery.com  | Bite-Sized Bakery | `9b214a90-8b30-427e-af60-6d8661ce9261` |
+| OWNER | Sarah Jenkins | SarahJenkins@Pawsandpalms.com  | Paws Pet Sitting | `22a9cee2-ecd5-4cd1-8359-38b67ced3f5d` |
 
 ---
 
@@ -48,13 +48,13 @@ mutation Mutation($input: RegisterOwnerInput!) {
 ```json
 {
   "input": {
-    "email": "alex.morgan@bitesizebakery.com",
-    "password": "SuperSecurePassword123!",
-    "firstName": "Alex",
-    "lastName": "Morgan",
-    "phone": "+15551234567",
-    "businessName": "Bite-Sized Bakery",
-    "businessDescription": "A boutique pastry shop specializing in sourdough croissants and custom mini cakes."
+    "businessName": "Paws Pet Sitting",
+    "businessDescription": "Premium in-home pet sitting, overnight care, and dog walking services for the local community. Fully insured and bonded.",
+    "email": "SarahJenkins@Pawsandpalms.com",
+    "firstName": "Sarah",
+    "lastName": "Jenkins",
+    "password": "SecurePassword123!",
+    "phone": "+15558675309"
   }
 }
 ```
@@ -65,23 +65,23 @@ mutation Mutation($input: RegisterOwnerInput!) {
 {
   "data": {
     "registerOwner": {
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI5YjIxNGE5MC04YjMwLTQyN2UtYWY2MC02ZDg2NjFjZTkyNjEiLCJlbWFpbCI6ImFsZXgubW9yZ2FuQGJpdGVzaXplYmFrZXJ5LmNvbSIsImdsb2JhbFJvbGUiOiJVU0VSIiwiaWF0IjoxNzgzNjk5MzcwLCJleHAiOjE3ODQzMDQxNzB9.P4EhSrb_J5trDMfK5e2RD-wNzpNDTcDjMigYmEsNbVc",
+      "business": {
+        "createdAt": "1783875038105",
+        "description": "Premium in-home pet sitting, overnight care, and dog walking services for the local community. Fully insured and bonded.",
+        "id": "debef9dc-8bab-4196-847f-655f7d687a42",
+        "isActive": true,
+        "name": "Paws Pet Sitting"
+      },
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyMmE5Y2VlMi1lY2Q1LTRjZDEtODM1OS0zOGI2N2NlZDNmNWQiLCJlbWFpbCI6InNhcmFoamVua2luc0BwYXdzYW5kcGFsbXMuY29tIiwiZ2xvYmFsUm9sZSI6IlVTRVIiLCJpYXQiOjE3ODM4NzUwMzgsImV4cCI6MTc4Mzk2MTQzOH0.6BMphazEkiCu-99RN9gOrWp-5ExPp6xzlV80HwpPWX0",
       "user": {
-        "id": "9b214a90-8b30-427e-af60-6d8661ce9261",
-        "email": "alex.morgan@bitesizebakery.com",
-        "firstName": "Alex",
-        "lastName": "Morgan",
-        "phone": "+15551234567",
+        "id": "22a9cee2-ecd5-4cd1-8359-38b67ced3f5d",
+        "email": "sarahjenkins@pawsandpalms.com",
+        "firstName": "Sarah",
+        "lastName": "Jenkins",
+        "phone": "+15558675309",
         "avatarUrl": null,
         "globalRole": "USER",
-        "createdAt": "1783699369960"
-      },
-      "business": {
-        "id": "747eae1a-f958-4281-a400-1b9a804b1bb0",
-        "name": "Bite-Sized Bakery",
-        "description": "A boutique pastry shop specializing in sourdough croissants and custom mini cakes.",
-        "isActive": true,
-        "createdAt": "1783699369965"
+        "createdAt": "1783875038104"
       }
     }
   }
@@ -95,10 +95,216 @@ mutation Mutation($input: RegisterOwnerInput!) {
 | User ID     | `9b214a90-8b30-427e-af60-6d8661ce9261`  |
 | Business ID | `747eae1a-f958-4281-a400-1b9a804b1bb0`  |
 | JWT (7d)    | See `token` field above                  |
+---
 
-> **Note:** The response key shows `ownerRegister` — this may reflect an older resolver name.
-> The current `typeDefs.ts` uses `registerOwner`. Verify if re-running this test.
+## 2. User Login
 
+### Input
+
+```graphql
+mutation Login($input: LoginInput!) {
+  login(input: $input) {
+    token
+    user {
+      id
+      email
+      firstName
+      lastName
+      phone
+      avatarUrl
+      globalRole
+      createdAt
+    }
+  }
+}
+```
+
+**Variables:**
+```json
+{
+  "input": {
+    "email": "SarahJenkins@Pawsandpalms.com",
+    "password": "SecurePassword123!"
+  }
+}
+```
+
+### Response
+
+```json
+{
+  "data": {
+    "login": {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyMmE5Y2VlMi1lY2Q1LTRjZDEtODM1OS0zOGI2N2NlZDNmNWQiLCJlbWFpbCI6InNhcmFoamVua2luc0BwYXdzYW5kcGFsbXMuY29tIiwiZ2xvYmFsUm9sZSI6IlVTRVIiLCJpYXQiOjE3ODM4NzUyNjMsImV4cCI6MTc4Mzk2MTY2M30.2N6J8MCrBq1aTVjOJw1eTBDCtAwJ95sovQRmgEw_bAs",
+      "user": {
+        "id": "22a9cee2-ecd5-4cd1-8359-38b67ced3f5d",
+        "email": "sarahjenkins@pawsandpalms.com",
+        "firstName": "Sarah",
+        "lastName": "Jenkins",
+        "phone": "+15558675309",
+        "avatarUrl": null,
+        "globalRole": "USER",
+        "createdAt": "1783875038104"
+      }
+    }
+  }
+}
+```
+
+### Key IDs
+
+| Field       | Value                                      |
+|-------------|--------------------------------------------|
+| User ID     | `22a9cee2-ecd5-4cd1-8359-38b67ced3f5d`     |
+| JWT (7d)    | See `token` field above                    |
+---
+
+## 3. Get Current User (getMe) --> **JWT Required**
+
+### Input
+
+```graphql
+query Query {
+  getMe {
+    id
+    email
+    firstName
+    lastName
+    phone
+    avatarUrl
+    globalRole
+    createdAt
+  }
+}
+```
+
+**Variables:**
+```json
+{}
+```
+
+### Response
+
+```json
+{
+  "data": {
+    "getMe": {
+      "id": "22a9cee2-ecd5-4cd1-8359-38b67ced3f5d",
+      "email": "sarahjenkins@pawsandpalms.com",
+      "firstName": "Sarah",
+      "lastName": "Jenkins",
+      "phone": "+15558675309",
+      "avatarUrl": null,
+      "globalRole": "USER",
+      "createdAt": "1783875038104"
+    }
+  }
+}
+```
+
+### Key IDs
+
+| Field       | Value                                      |
+|-------------|--------------------------------------------|
+| User ID     | `22a9cee2-ecd5-4cd1-8359-38b67ced3f5d`     |
+---
+
+## 4. Get User By ID (getUserById) --> **JWT Required**
+
+### Input
+
+```graphql
+query Query($userId: ID!) {
+  getUserById(userId: $userId) {
+    id
+    email
+    firstName
+    lastName
+    phone
+    avatarUrl
+    globalRole
+    createdAt
+  }
+}
+```
+
+**Variables:**
+```json
+{
+  "userId": "22a9cee2-ecd5-4cd1-8359-38b67ced3f5d"
+}
+```
+
+### Response
+
+```json
+{
+  "data": {
+    "getUserById": {
+      "id": "22a9cee2-ecd5-4cd1-8359-38b67ced3f5d",
+      "email": "sarahjenkins@pawsandpalms.com",
+      "firstName": "Sarah",
+      "lastName": "Jenkins",
+      "phone": "+15558675309",
+      "avatarUrl": null,
+      "globalRole": "USER",
+      "createdAt": "1783875038104"
+    }
+  }
+}
+```
+
+### Key IDs
+
+| Field       | Value                                      |
+|-------------|--------------------------------------------|
+| User ID     | `22a9cee2-ecd5-4cd1-8359-38b67ced3f5d`     |
+---
+
+## 5. Get My Businesses (getMyBusinesses) --> **JWT Required**
+
+### Input
+
+```graphql
+query GetMyBusinesses {
+  getMyBusinesses {
+    id
+    name
+    description
+    isActive
+    createdAt
+  }
+}
+```
+
+**Variables:**
+```json
+{}
+```
+
+### Response
+
+```json
+{
+  "data": {
+    "getMyBusinesses": [
+      {
+        "id": "debef9dc-8bab-4196-847f-655f7d687a42",
+        "name": "Paws Pet Sitting",
+        "description": "Premium in-home pet sitting, overnight care, and dog walking services for the local community. Fully insured and bonded.",
+        "isActive": true,
+        "createdAt": "1783875038105"
+      }
+    ]
+  }
+}
+```
+
+### Key IDs
+
+| Field       | Value                                      |
+|-------------|--------------------------------------------|
+| Business ID | `debef9dc-8bab-4196-847f-655f7d687a42`     |
 ---
 
 <!--
@@ -142,42 +348,3 @@ mutation/query OperationName($input: InputType!) {
 ================================================================
 -->
 
-## Bite-Sized Bakery Manager Invitation (NOT CORRECT TOKEN)
-
-```json
-{
-  "data": {
-    "inviteEmployee": {
-      "email": "TestManager@gmail.com",
-      "expiresAt": "1783989092424",
-      "id": "23735f5d-8bee-4588-8fbd-5accfe26c756",
-      "isAccepted": false,
-      "role": "MANAGER"
-    }
-  }
-}
-
-{
-  "token": "539bd39b1ccc66f11e05650260605f3bd9da67dbc0a537ecfcb759faac2ddcba"
-}
-```
-
-## Bite-Sized Bakery Manager Invitation (RESENT)
-
-```json
-{
-  "data": {
-    "inviteEmployee": {
-      "email": "TestManager@gmail.com",
-      "expiresAt": "1783989092424",
-      "id": "23735f5d-8bee-4588-8fbd-5accfe26c756",
-      "isAccepted": false,
-      "role": "MANAGER"
-    }
-  }
-}
-
-{
-  "token": "f70a74058810588f127443e7ecc887125764ff58f74186d0cf7dda6b9dc4bbb7"
-}
-```
