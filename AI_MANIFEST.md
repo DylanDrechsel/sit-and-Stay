@@ -70,7 +70,6 @@ pet_sitter_pro/
     │           ├── owner/
     │           │   ├── ownerResolvers.ts
     │           │   ├── queries/
-    │           │   │   └── getOwner.ts
     │           │   └── mutations/
     │           │       └── registerOwner.ts
     │           ├── customer/
@@ -550,8 +549,7 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` stay in lockstep.
 The root resolver map explicitly spreads the user and business query and mutation barrels, so the
-declared business operations below are callable. `registerOwner` is registered only as a mutation;
-the legacy `getOwner` source file is not exposed through the GraphQL schema.
+declared business operations below are callable. `registerOwner` is registered only as a mutation.
 
 ### Declared Queries
 
