@@ -57,6 +57,7 @@ CREATE TABLE "BusinessMember" (
     "userId" TEXT NOT NULL,
     "businessId" TEXT NOT NULL,
     "role" "BusinessRole" NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
     "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "BusinessMember_pkey" PRIMARY KEY ("id")
@@ -200,7 +201,9 @@ CREATE TABLE "Message" (
 -- CreateTable
 CREATE TABLE "_JobPets" (
     "A" TEXT NOT NULL,
-    "B" TEXT NOT NULL
+    "B" TEXT NOT NULL,
+
+    CONSTRAINT "_JobPets_AB_pkey" PRIMARY KEY ("A","B")
 );
 
 -- CreateIndex
@@ -214,6 +217,9 @@ CREATE INDEX "business_location_idx" ON "Business" USING GIST ("location");
 
 -- CreateIndex
 CREATE INDEX "BusinessMember_businessId_idx" ON "BusinessMember"("businessId");
+
+-- CreateIndex
+CREATE INDEX "BusinessMember_businessId_isActive_idx" ON "BusinessMember"("businessId", "isActive");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "BusinessMember_userId_businessId_key" ON "BusinessMember"("userId", "businessId");
@@ -262,9 +268,6 @@ CREATE INDEX "Conversation_memberId_idx" ON "Conversation"("memberId");
 
 -- CreateIndex
 CREATE INDEX "Message_conversationId_createdAt_idx" ON "Message"("conversationId", "createdAt" DESC);
-
--- CreateIndex
-CREATE UNIQUE INDEX "_JobPets_AB_unique" ON "_JobPets"("A", "B");
 
 -- CreateIndex
 CREATE INDEX "_JobPets_B_index" ON "_JobPets"("B");
