@@ -2,15 +2,12 @@ import { GraphQLError } from 'graphql';
 import type { GraphQLContext } from '../../../../types/context.js';
 
 /**
- * getBusinessMembers
+ * getInactiveBusinessMembers
  *
- * Returns all members of the given business, each with their full User profile
- * embedded. The caller must themselves be a member of the business to see the list
- * (any role qualifies — OWNER, MANAGER, or EMPLOYEE).
- *
- * Members are ordered by joinedAt ascending so the OWNER always appears first.
+ * Returns all inactive members of the given business, each with their full User profile
+ * embedded. The caller must themselves be an active member of the business to see the list.
  */
-export const getBusinessMembers = async (
+export const getInactiveBusinessMembers = async (
     _: unknown,
     { businessId }: { businessId: string },
     context: GraphQLContext,
@@ -21,7 +18,6 @@ export const getBusinessMembers = async (
         });
     }
 
-    // Verify the caller is actually a member of this business
     const callerMembership = await context.prisma.businessMember.findUnique({
         where: {
             userId_businessId: { userId: context.user.userId, businessId },
@@ -34,9 +30,8 @@ export const getBusinessMembers = async (
         });
     }
 
-    // Fetch all members with their user profiles included
     const members = await context.prisma.businessMember.findMany({
-        where: { businessId, isActive: true },
+        where: { businessId, isActive: false },
         include: { user: true },
         orderBy: { joinedAt: 'asc' },
     });

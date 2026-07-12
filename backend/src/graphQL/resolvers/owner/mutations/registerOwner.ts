@@ -43,7 +43,12 @@ export const registerOwner = async (
             data: { name: businessName, description: businessDescription ?? null },
         });
         await tx.businessMember.create({
-            data: { userId: newUser.id, businessId: newBusiness.id, role: 'OWNER' },
+            data: {
+                userId: newUser.id,
+                businessId: newBusiness.id,
+                role: 'OWNER',
+                isActive: true,
+            },
         });
         return { user: newUser, business: newBusiness };
     });

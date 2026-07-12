@@ -24,16 +24,16 @@
 | Layer                | Technology                                        |
 |----------------------|---------------------------------------------------|
 | Runtime              | Node.js (ESM, `"type": "module"`)                 |
-| Language             | TypeScript 5                                      |
-| Web Framework        | Express 4                                         |
-| API Layer            | Apollo Server 4 (GraphQL) via Express             |
-| ORM                  | Prisma 5 (with `postgresqlExtensions` preview)    |
+| Language             | TypeScript 7                                      |
+| Web Framework        | Express 5                                         |
+| API Layer            | Apollo Server 5 (GraphQL) via the Express 5 integration |
+| ORM                  | Prisma 7 with the `@prisma/adapter-pg` driver adapter |
 | Database             | PostgreSQL 16 + PostGIS 3.4 (via Docker)          |
 | Geospatial           | PostGIS — `geometry(Point, 4326)` + GiST indexes  |
 | Dev Runner           | `tsx watch`                                       |
 | Auth                 | JWT (`jsonwebtoken`) + bcrypt                     |
 | Email                | Nodemailer (`nodemailer` + `@types/nodemailer`)   |
-| Validation (planned) | Zod                                               |
+| Validation           | Zod 4                                             |
 
 ---
 
@@ -55,9 +55,9 @@ pet_sitter_pro/
     │   │   ├── auth.ts            # LoginInput
     │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput
     │   │   ├── context.ts         # GraphQLContext interface
-    │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput
+    │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput, InvitationEmailPayload
     │   │   ├── registration.ts    # RegisterCustomerInput, RegisterOwnerInput
-    │   │   └── user.ts            # UpdateUserInput
+    │   │   └── user.ts            # UpdateUserInput, ChangePasswordInput, ChangeEmailInput
     │   ├── utils/
     │   │   ├── generatePrisma.ts  # Prisma singleton using pg.Pool + PrismaPg adapter
     │   │   ├── auth.ts            # hashPassword, comparePassword, signToken, verifyToken, TokenPayload
@@ -81,13 +81,26 @@ pet_sitter_pro/
     │           │   ├── invitationResolvers.ts
     │           │   └── mutations/
     │           │       ├── inviteEmployee.ts
-    │           │       └── acceptInvitation.ts
+    │           │       ├── acceptInvitation.ts
+    │           │       └── resendInvitation.ts
     │           ├── user/
     │           │   ├── userResolvers.ts
     │           │   ├── queries/
     │           │   │   ├── getMe.ts
     │           │   │   └── getUserById.ts
     │           │   └── mutations/
+    │           │       ├── changeEmail.ts
+    │           │       ├── changePassword.ts
+    │           │       └── updateUser.ts
+    │           ├── business/
+    │           │   ├── businessResolvers.ts
+    │           │   ├── queries/
+    │           │   │   ├── getBusinessMembers.ts
+    │           │   │   └── getMyBusinesses.ts
+    │           │   └── mutations/
+    │           │       ├── deactivateBusiness.ts
+    │           │       ├── removeMember.ts
+    │           │       └── updateBusiness.ts
     │           └── utils/
     │               ├── utilsResolvers.ts
     │               └── mutations/
@@ -97,9 +110,10 @@ pet_sitter_pro/
     └── tsconfig.json
 ```
 
-> **Convention**: Each domain folder (`owner/`, `customer/`, `invitation/`, `utils/`) contains
-> a `*Resolvers.ts` barrel file that groups its `Query` and `Mutation` maps, then all are
-> spread into the root `resolvers/index.ts`.
+> **Convention**: Each domain folder (`owner/`, `customer/`, `invitation/`, `user/`,
+> `business/`, `utils/`) contains a `*Resolvers.ts` barrel file that groups its `Query` and
+> `Mutation` maps. The root `resolvers/index.ts` must explicitly import and spread each barrel;
+> adding a domain folder alone does not expose its fields through GraphQL.
 
 ---
 
@@ -291,6 +305,7 @@ A user can be a member of multiple businesses, but only one role per business (`
 | `userId`    | String       | FK → `users.id`, cascade delete     |
 | `businessId`| String       | FK → `businesses.id`, cascade delete|
 | `role`      | BusinessRole | `OWNER`, `MANAGER`, or `EMPLOYEE`   |
+| `isActive`  | Boolean      | default `true`; set to `false` when the member is removed |
 | `joinedAt`  | DateTime     | default now                         |
 
 **Relations:**
@@ -299,6 +314,12 @@ A user can be a member of multiple businesses, but only one role per business (`
 - `availability` → `EmployeeAvailability[]`
 - `assignedJobs` → `Job[]` (via `JobAssignee` relation name)
 - `conversations` → `Conversation[]` (Owner↔Employee conversations)
+
+**Indexes:** `businessId`, `(businessId, isActive)`
+
+`removeMember` is a soft removal: it preserves the membership and related history while setting
+`isActive` to `false`. A later accepted invitation for the same user and business reactivates
+the existing record and updates its role.
 
 ---
 
@@ -525,17 +546,25 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 > **Planned**: Context will also expose `activeBusinessId` and `activeRole` (tenant-scoped)
 > once the business-selection flow is implemented.
 
-### Current Queries
+### Resolver Registration Status
+
+The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` stay in lockstep.
+The root resolver map explicitly spreads the user and business query and mutation barrels, so the
+declared business operations below are callable. `registerOwner` is registered only as a mutation;
+the legacy `getOwner` source file is not exposed through the GraphQL schema.
+
+### Declared Queries
 
 | Query         | Args            | Returns            | Auth Required | Location                               |
 |---------------|-----------------|--------------------|---------------|----------------------------------------|
 | `healthCheck` | none            | `String`           | No            | `resolvers/index.ts`                   |
 | `getMe`       | none            | `User!`            | Yes (JWT)     | `resolvers/user/queries/getMe.ts`      |
 | `getUserById` | `userId: ID!`   | `User!`            | Yes (JWT)     | `resolvers/user/queries/getUserById.ts`|
-| `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` |
-| `getBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + member) | `resolvers/business/queries/getBusinessMembers.ts` |
+| `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` — returns active memberships only |
+| `getBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getBusinessMembers.ts` |
+| `getInactiveBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getInactiveBusinessMembers.ts` |
 
-### Current Mutations
+### Declared Mutations
 
 | Mutation            | Input                    | Returns            | Auth Required | Location                                          |
 |---------------------|--------------------------|--------------------|---------------|---------------------------------------------------|
@@ -544,22 +573,39 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 | `login`             | `LoginInput`             | `AuthPayload`      | No            | `resolvers/utils/mutations/login.ts`              |
 | `inviteEmployee`    | `InviteInput`            | `Invitation`       | Yes (OWNER/MANAGER) | `resolvers/invitation/mutations/inviteEmployee.ts` — sends invitation email via `utils/email.ts` |
 | `resendInvitation`  | `InviteInput`            | `Invitation`       | Yes (OWNER/MANAGER) | `resolvers/invitation/mutations/resendInvitation.ts` — regenerates token + resets expiry + re-sends email |
-| `acceptInvitation`  | `AcceptInvitationInput`  | `AuthPayload`      | No            | `resolvers/invitation/mutations/acceptInvitation.ts` — two-path: creates User for new invitees; links existing account to the business for returning users |
-| `updateUser`        | `UpdateUserInput`        | `User!`            | Yes (JWT)     | `resolvers/user/mutations/updateUser.ts` — partial update; only provided fields written; phone/avatarUrl clearable via empty string |
+| `acceptInvitation`  | `AcceptInvitationInput`  | `AuthPayload`      | No            | `resolvers/invitation/mutations/acceptInvitation.ts` — two-path: creates User for new invitees; links a new existing account or reactivates a removed membership |
+| `updateUser`        | `UpdateUserInput`        | `User!`            | Yes (JWT)     | `resolvers/user/mutations/updateUser.ts` — partial update; only provided fields written. The resolver has empty-value clearing branches, but current Zod validation rejects empty phone and avatar URL inputs. |
 | `changePassword`    | `ChangePasswordInput`    | `User!`            | Yes (JWT)     | `resolvers/user/mutations/changePassword.ts` — verifies current password; rejects if new == current |
 | `changeEmail`       | `ChangeEmailInput`       | `User!`            | Yes (JWT)     | `resolvers/user/mutations/changeEmail.ts` — confirms identity via password; checks uniqueness; normalizes to lowercase |
-| `updateBusiness`    | `UpdateBusinessInput`    | `Business!`        | Yes (OWNER/MANAGER) | `resolvers/business/mutations/updateBusiness.ts` |
-| `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
-| `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` |
+| `updateBusiness`    | `UpdateBusinessInput`    | `Business!`        | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/updateBusiness.ts` |
+| `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (active OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
+| `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` — sets `isActive` to `false`; does not delete the row |
 
-### GraphQL Return Types
+### GraphQL Input Types
+
+| Input | Fields | Validation and behavior |
+|-------|--------|-------------------------|
+| `RegisterCustomerInput` | `email`, `password`, `firstName`, `lastName`, `phone?` | Creates a `User` with a `CustomerProfile`. Password must be at least 8 characters and include uppercase, numeric, and special characters. |
+| `RegisterOwnerInput` | Customer fields plus `businessName`, `businessDescription?` | Creates the user, business, and OWNER membership atomically. |
+| `LoginInput` | `email`, `password` | Email is trimmed and lowercased. |
+| `InviteInput` | `email`, `role`, `businessId` | `role` must be `MANAGER` or `EMPLOYEE`; used for both initial and resent invitations. A resend keeps the existing invitation's role. |
+| `AcceptInvitationInput` | `token`, `password?`, `firstName?`, `lastName?`, `phone?` | Profile fields are conditionally required only when the invitee does not already have an account. |
+| `UpdateUserInput` | `firstName?`, `lastName?`, `phone?`, `avatarUrl?` | Requires at least one field. Phone must match the phone pattern and `avatarUrl` must be a URL. Although the resolver has empty-value clearing branches, current Zod validation rejects empty strings for these fields. |
+| `ChangePasswordInput` | `currentPassword`, `newPassword` | New password must meet the registration password rules and differ from the current one. |
+| `ChangeEmailInput` | `newEmail`, `password` | Confirms the password and normalizes the new email to lowercase. |
+| `UpdateBusinessInput` | `businessId`, `name?`, `description?` | Requires a UUID business ID and at least one update field. Empty `description` clears the stored value. |
+| `RemoveMemberInput` | `businessId`, `memberId` | Both IDs must be UUIDs; `memberId` identifies a `BusinessMember`, not a `User`. |
+
+### GraphQL Object Types
 
 | Type               | Fields                                      | Notes                                    |
 |--------------------|---------------------------------------------|------------------------------------------|
+| `User`             | `id, email, firstName, lastName, phone?, avatarUrl?, globalRole, createdAt` | User responses intentionally omit `passwordHash`. |
+| `Business`         | `id, name, description?, isActive, createdAt` | The GraphQL type does not currently expose PostGIS location or `updatedAt`. |
 | `AuthPayload`      | `token: String!, user: User!`               | Returned by `registerCustomer`, `login`, `acceptInvitation` |
 | `OwnerAuthPayload` | `token: String!, user: User!, business: Business!` | Returned by `registerOwner`       |
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
-| `BusinessMember`   | `id, role, joinedAt, user: User!`           | Returned by `getBusinessMembers`, `removeMember` |
+| `BusinessMember`   | `id, role, isActive, joinedAt, user: User!` | Returned by `getBusinessMembers`, `removeMember` |
 
 ### `AcceptInvitationInput` — Two-Path Logic
 
@@ -569,10 +615,21 @@ The resolver enforces them **conditionally** after checking the invitation email
 | Scenario | Required fields | What the resolver does |
 |----------|----------------|------------------------|
 | **New user** (email has no account) | `token`, `password`, `firstName`, `lastName` | Creates `User` + `BusinessMember` in one transaction |
-| **Existing user** (email already registered) | `token` only | Creates `BusinessMember` only; profile fields are ignored |
+| **Existing user** (email already registered) | `token` only | Creates a membership, or reactivates the existing inactive membership; profile fields are ignored |
 
 In both cases the invitation is marked `isAccepted: true` and a JWT is returned.
-If the existing user is already a member of that business, a `BAD_USER_INPUT` error is thrown.
+If the existing user is already an active member of that business, a `BAD_USER_INPUT` error is thrown.
+
+### Business Resolver Behavior
+
+The following handlers are implemented and registered through `resolvers/business/`.
+
+- `getMyBusinesses` returns every business where the authenticated user has an active membership, ordered by `joinedAt` ascending.
+- `getBusinessMembers` accepts any active business member role and returns active members with their user profile, ordered by `joinedAt` ascending.
+- `getInactiveBusinessMembers` accepts any active business member role and returns inactive members with their user profile, ordered by `joinedAt` ascending.
+- `updateBusiness` permits only an active OWNER or MANAGER of the target business. It applies a partial update and treats an empty description as `null`.
+- `deactivateBusiness` is active-OWNER-only, rejects unknown or already inactive businesses, and performs a soft delete by setting `isActive` to `false`.
+- `removeMember` permits active OWNERs to remove MANAGERs or EMPLOYEEs and active MANAGERs to remove EMPLOYEEs only. It rejects self-removal, removal of the OWNER, already inactive members, and members from another business. It retains the row and sets its `isActive` flag to `false`.
 
 ### Scalar Types
 
@@ -588,6 +645,8 @@ If the existing user is already a member of that business, a `BAD_USER_INPUT` er
 - Uses **Shared Database with Tenant ID** — all businesses share the same tables, scoped by `businessId`
 - Every resolver that reads business data **must** filter by `businessId` — never return cross-tenant data
 - Roles are **tenant-scoped** via `BusinessMember.role`, not global — a user can be `OWNER` of Business A and `EMPLOYEE` of Business B
+
+- Membership authorization must also require `BusinessMember.isActive`; a soft-removed member retains history but has no business access.
 
 ### Auth Flow
 - JWT tokens are signed by `signToken()` in `src/utils/auth.ts` (default expiry: `1d`, overridable via `JWT_EXPIRES_IN` env var)
@@ -619,7 +678,7 @@ If the existing user is already a member of that business, a `BAD_USER_INPUT` er
 3. Add TypeScript input interface to the appropriate file in `src/types/`
 4. Create the resolver in the appropriate domain folder under `src/graphQL/resolvers/<domain>/queries/` or `.../mutations/`
 5. Export it from the domain's `*Resolvers.ts` barrel file
-6. The barrel is already spread in `resolvers/index.ts` — no change needed there unless adding a new domain
+6. Import the domain barrel and spread the new `Query` and/or `Mutation` map in `resolvers/index.ts`; verify every SDL field has a matching registered resolver
 7. Update this manifest
 
 ### New Resolver Domain
@@ -648,8 +707,14 @@ docker compose up -d
 # Stop the database
 docker compose down
 
+# Backend commands (run from the repository root)
+cd backend
+
 # Start dev server (auto-reloads)
 npm run dev
+
+# Type-check and compile TypeScript to backend/dist/
+npm run build
 
 # Create a new migration after schema changes
 npx prisma migrate dev --name <description>

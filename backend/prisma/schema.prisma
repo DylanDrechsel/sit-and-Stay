@@ -114,6 +114,7 @@ model BusinessMember {
   userId        String
   businessId    String
   role          BusinessRole
+  isActive      Boolean                @default(true)
   joinedAt      DateTime               @default(now())
 
   user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -125,6 +126,7 @@ model BusinessMember {
   // Ensure a user has only one role per business
   @@unique([userId, businessId])
   @@index([businessId])
+  @@index([businessId, isActive])
 }
 
 model Invitation {

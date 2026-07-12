@@ -55,7 +55,7 @@ export const inviteEmployee = async (
         }),
     ]);
 
-    if (membership == null || !['OWNER', 'MANAGER'].includes(membership.role)) {
+    if (membership == null || !membership.isActive || !['OWNER', 'MANAGER'].includes(membership.role)) {
         throw new GraphQLError('You do not have permission to invite members to this business', {
             extensions: { code: 'FORBIDDEN' },
         });

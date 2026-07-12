@@ -47,6 +47,7 @@ const typeDefs = `#graphql
   type BusinessMember {
     id: ID!
     role: String!        # OWNER | MANAGER | EMPLOYEE
+    isActive: Boolean!
     joinedAt: String!
     user: User!          # Full profile of the member
   }
@@ -139,8 +140,11 @@ const typeDefs = `#graphql
     # Returns all businesses the authenticated user is a member of (requires JWT)
     getMyBusinesses: [Business!]!
 
-    # Returns all members of a business with their user profiles (requires JWT + membership)
+    # Returns all active members of a business with their user profiles (requires JWT + active membership)
     getBusinessMembers(businessId: ID!): [BusinessMember!]!
+
+    # Returns all inactive members of a business with their user profiles (requires JWT + active membership)
+    getInactiveBusinessMembers(businessId: ID!): [BusinessMember!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -185,7 +189,7 @@ const typeDefs = `#graphql
     # Soft-deletes a business by setting isActive to false (OWNER only)
     deactivateBusiness(businessId: ID!): Business!
 
-    # Removes a member from a business
+    # Soft-removes a member from a business by setting BusinessMember.isActive to false
     # OWNER can remove MANAGER or EMPLOYEE; MANAGER can only remove EMPLOYEE
     removeMember(input: RemoveMemberInput!): BusinessMember!
 

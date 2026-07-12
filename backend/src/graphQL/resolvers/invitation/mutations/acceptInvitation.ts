@@ -94,6 +94,7 @@ export const acceptInvitation = async (
                     userId: user.id,
                     businessId: invitation.businessId,
                     role: invitation.role,
+                    isActive: true,
                 },
             });
 
@@ -125,22 +126,31 @@ export const acceptInvitation = async (
         },
     });
 
-    if (alreadyMember != null) {
+    if (alreadyMember?.isActive) {
         throw new GraphQLError(
             'You are already a member of this business.',
             { extensions: { code: 'BAD_USER_INPUT' } },
         );
     }
 
-    // Link the existing user to the business + mark invitation accepted atomically
+    // Link a new user to the business or reactivate a previously removed member.
+    // Mark the invitation accepted in the same transaction.
     await context.prisma.$transaction(async (tx) => {
-        await tx.businessMember.create({
-            data: {
-                userId: existingUser.id,
-                businessId: invitation.businessId,
-                role: invitation.role,
-            },
-        });
+        if (alreadyMember == null) {
+            await tx.businessMember.create({
+                data: {
+                    userId: existingUser.id,
+                    businessId: invitation.businessId,
+                    role: invitation.role,
+                    isActive: true,
+                },
+            });
+        } else {
+            await tx.businessMember.update({
+                where: { id: alreadyMember.id },
+                data: { role: invitation.role, isActive: true },
+            });
+        }
 
         await tx.invitation.update({
             where: { id: invitation.id },

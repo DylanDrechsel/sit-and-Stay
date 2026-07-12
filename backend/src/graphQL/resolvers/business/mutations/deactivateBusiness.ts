@@ -35,7 +35,7 @@ export const deactivateBusiness = async (
         },
     });
 
-    if (membership == null || membership.role !== 'OWNER') {
+    if (membership == null || !membership.isActive || membership.role !== 'OWNER') {
         throw new GraphQLError('Only the business owner can deactivate a business.', {
             extensions: { code: 'FORBIDDEN' },
         });

@@ -21,7 +21,7 @@ export const getMyBusinesses = async (
     }
 
     const memberships = await context.prisma.businessMember.findMany({
-        where: { userId: context.user.userId },
+        where: { userId: context.user.userId, isActive: true },
         include: { business: true },
         orderBy: { joinedAt: 'asc' },
     });
