@@ -141,3 +141,43 @@ mutation/query OperationName($input: InputType!) {
 
 ================================================================
 -->
+
+## Bite-Sized Bakery Manager Invitation (NOT CORRECT TOKEN)
+
+```json
+{
+  "data": {
+    "inviteEmployee": {
+      "email": "TestManager@gmail.com",
+      "expiresAt": "1783989092424",
+      "id": "23735f5d-8bee-4588-8fbd-5accfe26c756",
+      "isAccepted": false,
+      "role": "MANAGER"
+    }
+  }
+}
+
+{
+  "token": "539bd39b1ccc66f11e05650260605f3bd9da67dbc0a537ecfcb759faac2ddcba"
+}
+```
+
+## Bite-Sized Bakery Manager Invitation (RESENT)
+
+```json
+{
+  "data": {
+    "inviteEmployee": {
+      "email": "TestManager@gmail.com",
+      "expiresAt": "1783989092424",
+      "id": "23735f5d-8bee-4588-8fbd-5accfe26c756",
+      "isAccepted": false,
+      "role": "MANAGER"
+    }
+  }
+}
+
+{
+  "token": "f70a74058810588f127443e7ecc887125764ff58f74186d0cf7dda6b9dc4bbb7"
+}
+```

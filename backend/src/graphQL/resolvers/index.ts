@@ -16,6 +16,7 @@ export default {
         ...ownerResolvers.Mutation,
         ...customerResolvers.Mutation,
         ...utilsResolvers.Mutation,
+        ...userResolvers.Mutation,
     },
     JSON: GraphQLJSON,
 };

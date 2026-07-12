@@ -31,8 +31,8 @@
 | Database             | PostgreSQL 16 + PostGIS 3.4 (via Docker)          |
 | Geospatial           | PostGIS — `geometry(Point, 4326)` + GiST indexes  |
 | Dev Runner           | `tsx watch`                                       |
-| Auth (planned)       | JWT (`jsonwebtoken`) + bcrypt                     |
-| Email (planned)      | Nodemailer                                        |
+| Auth                 | JWT (`jsonwebtoken`) + bcrypt                     |
+| Email                | Nodemailer (`nodemailer` + `@types/nodemailer`)   |
 | Validation (planned) | Zod                                               |
 
 ---
@@ -48,16 +48,20 @@ pet_sitter_pro/
     ├── prisma/
     │   ├── schema.prisma          # Single source of truth for all DB models
     │   └── migrations/            # Prisma migration history (committed to git)
+    ├── prisma.config.ts           # Prisma CLI config (points to schema.prisma)
     ├── src/
     │   ├── server.ts              # Entry point — Express + Apollo setup
     │   ├── types/                 # Shared TypeScript interfaces
     │   │   ├── auth.ts            # LoginInput
+    │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput
     │   │   ├── context.ts         # GraphQLContext interface
     │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput
-    │   │   └── registration.ts    # RegisterCustomerInput, RegisterOwnerInput
+    │   │   ├── registration.ts    # RegisterCustomerInput, RegisterOwnerInput
+    │   │   └── user.ts            # UpdateUserInput
     │   ├── utils/
-    │   │   ├── generatePrisma.ts  # Prisma singleton (prevents hot-reload connection exhaustion)
+    │   │   ├── generatePrisma.ts  # Prisma singleton using pg.Pool + PrismaPg adapter
     │   │   ├── auth.ts            # hashPassword, comparePassword, signToken, verifyToken, TokenPayload
+    │   │   ├── email.ts           # Nodemailer transporter + sendInvitationEmail
     │   │   └── validate.ts        # Zod schemas for all inputs + formatZodError helper
     │   └── graphQL/
     │       ├── typeDefs.ts        # GraphQL schema (SDL)
@@ -101,11 +105,18 @@ pet_sitter_pro/
 
 ## 4. Environment Variables (`.env`)
 
-| Variable       | Description                          | Value                                                              |
-|----------------|--------------------------------------|--------------------------------------------------------------------|
-| `DATABASE_URL` | Prisma PostgreSQL connection string  | `postgresql://postgres:postgres@localhost:5432/pet_sitter_pro?schema=public` |
-| `PORT`         | HTTP port the server listens on      | `4000`                                                             |
-| `JWT_SECRET`   | Secret key for signing JWTs          | `changeme_supersecret_jwt_key`                                     |
+| Variable         | Description                                                    | Example / Default                                                          |
+|------------------|----------------------------------------------------------------|----------------------------------------------------------------------------|
+| `DATABASE_URL`   | Prisma PostgreSQL connection string                            | `postgresql://postgres:postgres@localhost:5432/pet_sitter_pro?schema=public` |
+| `PORT`           | HTTP port the server listens on                                | `4000`                                                                     |
+| `JWT_SECRET`     | Secret key for signing JWTs                                    | `changeme_supersecret_jwt_key`                                             |
+| `JWT_EXPIRES_IN` | JWT expiry duration (optional)                                 | `1d`                                                                       |
+| `EMAIL_HOST`     | SMTP server hostname                                           | `smtp.gmail.com`                                                           |
+| `EMAIL_PORT`     | SMTP port (`587` for STARTTLS, `465` for SSL)                  | `587`                                                                      |
+| `EMAIL_USER`     | SMTP login username                                            | `your-email@gmail.com`                                                     |
+| `EMAIL_PASS`     | SMTP password or app-specific password                         | —                                                                          |
+| `EMAIL_FROM`     | Display name + address for outgoing mail                       | `PetSitterPro <noreply@petsitterpro.com>`                                  |
+| `APP_BASE_URL`   | Frontend base URL used to build invitation acceptance links    | `http://localhost:3000`                                                    |
 
 ---
 
@@ -155,15 +166,32 @@ The database persists data in a Docker named volume (`pgdata`) so data survives 
 ## 7. Database Connection (`src/utils/generatePrisma.ts`)
 
 **What it does:**
-- Implements the **Singleton Pattern** for the `PrismaClient`.
+- Implements the **Singleton Pattern** for the `PrismaClient` using the Prisma driver adapter API.
+- Uses a **`pg.Pool`** (node-postgres) created from `DATABASE_URL`, wrapped in a **`PrismaPg`** adapter (`@prisma/adapter-pg`).
+- The adapter is passed directly to `new PrismaClient({ adapter })` — this is the recommended approach for using Prisma with a connection pool.
 - Attaches the Prisma instance to the Node.js `globalThis` object during local development.
 - Prevents database connection exhaustion (the "Too many connections" error) caused by the server hot-reloading on every file save.
 - Logs `info` and `warn` level events; uses `pretty` error format.
+
+**Implementation overview:**
+```ts
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prismaClientSingleton = () => new PrismaClient({ adapter, log: ['info', 'warn'], errorFormat: 'pretty' });
+
+const db = globalThis.prismaGlobal ?? prismaClientSingleton();
+if (process.env.NODE_ENV !== 'production') globalThis.prismaGlobal = db;
+
+export default db;
+```
 
 **Exported values:**
 ```ts
 export default db  // Import this if you need DB access outside of GraphQL resolvers (e.g., utility scripts)
 ```
+
+> ⚠️ Because Prisma is initialized with a driver adapter, the `postgresqlExtensions` preview feature
+> must remain in `schema.prisma` and `prisma.config.ts` must point to the correct schema path.
 
 ---
 
@@ -499,12 +527,13 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 ### Current Queries
 
-| Query         | Args            | Returns  | Auth Required | Location                               |
-|---------------|-----------------|----------|---------------|----------------------------------------|
-| `healthCheck` | none            | `String` | No            | `resolvers/index.ts`                   |
-| `getOwner`    | none            | `User!`  | Yes (JWT)     | `resolvers/owner/queries/getOwner.ts`  |
-| `getMe`       | none            | `User!`  | Yes (JWT)     | `resolvers/user/queries/getMe.ts`      |
-| `getUserById` | `userId: ID!`   | `User!`  | Yes (JWT)     | `resolvers/user/queries/getUserById.ts`|
+| Query         | Args            | Returns            | Auth Required | Location                               |
+|---------------|-----------------|--------------------|---------------|----------------------------------------|
+| `healthCheck` | none            | `String`           | No            | `resolvers/index.ts`                   |
+| `getMe`       | none            | `User!`            | Yes (JWT)     | `resolvers/user/queries/getMe.ts`      |
+| `getUserById` | `userId: ID!`   | `User!`            | Yes (JWT)     | `resolvers/user/queries/getUserById.ts`|
+| `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` |
+| `getBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + member) | `resolvers/business/queries/getBusinessMembers.ts` |
 
 ### Current Mutations
 
@@ -513,8 +542,15 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 | `registerCustomer`  | `RegisterCustomerInput`  | `AuthPayload`      | No            | `resolvers/customer/mutations/registerCustomer.ts`|
 | `registerOwner`     | `RegisterOwnerInput`     | `OwnerAuthPayload` | No            | `resolvers/owner/mutations/registerOwner.ts`      |
 | `login`             | `LoginInput`             | `AuthPayload`      | No            | `resolvers/utils/mutations/login.ts`              |
-| `inviteEmployee`    | `InviteInput`            | `Invitation`       | Yes (OWNER/MANAGER) | `resolvers/invitation/mutations/inviteEmployee.ts` |
-| `acceptInvitation`  | `AcceptInvitationInput`  | `AuthPayload`      | No            | `resolvers/invitation/mutations/acceptInvitation.ts` |
+| `inviteEmployee`    | `InviteInput`            | `Invitation`       | Yes (OWNER/MANAGER) | `resolvers/invitation/mutations/inviteEmployee.ts` — sends invitation email via `utils/email.ts` |
+| `resendInvitation`  | `InviteInput`            | `Invitation`       | Yes (OWNER/MANAGER) | `resolvers/invitation/mutations/resendInvitation.ts` — regenerates token + resets expiry + re-sends email |
+| `acceptInvitation`  | `AcceptInvitationInput`  | `AuthPayload`      | No            | `resolvers/invitation/mutations/acceptInvitation.ts` — two-path: creates User for new invitees; links existing account to the business for returning users |
+| `updateUser`        | `UpdateUserInput`        | `User!`            | Yes (JWT)     | `resolvers/user/mutations/updateUser.ts` — partial update; only provided fields written; phone/avatarUrl clearable via empty string |
+| `changePassword`    | `ChangePasswordInput`    | `User!`            | Yes (JWT)     | `resolvers/user/mutations/changePassword.ts` — verifies current password; rejects if new == current |
+| `changeEmail`       | `ChangeEmailInput`       | `User!`            | Yes (JWT)     | `resolvers/user/mutations/changeEmail.ts` — confirms identity via password; checks uniqueness; normalizes to lowercase |
+| `updateBusiness`    | `UpdateBusinessInput`    | `Business!`        | Yes (OWNER/MANAGER) | `resolvers/business/mutations/updateBusiness.ts` |
+| `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
+| `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` |
 
 ### GraphQL Return Types
 
@@ -522,7 +558,21 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 |--------------------|---------------------------------------------|------------------------------------------|
 | `AuthPayload`      | `token: String!, user: User!`               | Returned by `registerCustomer`, `login`, `acceptInvitation` |
 | `OwnerAuthPayload` | `token: String!, user: User!, business: Business!` | Returned by `registerOwner`       |
-| `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`             |
+| `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
+| `BusinessMember`   | `id, role, joinedAt, user: User!`           | Returned by `getBusinessMembers`, `removeMember` |
+
+### `AcceptInvitationInput` — Two-Path Logic
+
+`password`, `firstName`, and `lastName` are optional in the GraphQL schema and Zod schema.
+The resolver enforces them **conditionally** after checking the invitation email:
+
+| Scenario | Required fields | What the resolver does |
+|----------|----------------|------------------------|
+| **New user** (email has no account) | `token`, `password`, `firstName`, `lastName` | Creates `User` + `BusinessMember` in one transaction |
+| **Existing user** (email already registered) | `token` only | Creates `BusinessMember` only; profile fields are ignored |
+
+In both cases the invitation is marked `isAccepted: true` and a JWT is returned.
+If the existing user is already a member of that business, a `BAD_USER_INPUT` error is thrown.
 
 ### Scalar Types
 

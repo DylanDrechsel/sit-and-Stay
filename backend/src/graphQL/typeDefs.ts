@@ -43,6 +43,14 @@ const typeDefs = `#graphql
     isAccepted: Boolean!
   }
 
+  # A user's membership record within a specific business
+  type BusinessMember {
+    id: ID!
+    role: String!        # OWNER | MANAGER | EMPLOYEE
+    joinedAt: String!
+    user: User!          # Full profile of the member
+  }
+
   # ── Inputs ─────────────────────────────────────────────────────────
 
   input RegisterCustomerInput {
@@ -76,23 +84,63 @@ const typeDefs = `#graphql
 
   input AcceptInvitationInput {
     token: String!
-    password: String!
-    firstName: String!
-    lastName: String!
+    # Required for new users — omit if the invited email already has an account
+    password: String
+    firstName: String
+    lastName: String
     phone: String
+  }
+
+  # All fields optional — only provided fields are updated (partial update)
+  # Pass an empty string for phone or avatarUrl to clear the field.
+  input UpdateUserInput {
+    firstName: String
+    lastName: String
+    phone: String
+    avatarUrl: String
+  }
+
+  input ChangePasswordInput {
+    currentPassword: String!
+    newPassword: String!
+  }
+
+  input ChangeEmailInput {
+    newEmail: String!
+    password: String!  # Current password — confirms identity before the change is applied
+  }
+
+  # ── Business inputs ————————————————————————————————
+
+  # At least one of name or description must be provided
+  input UpdateBusinessInput {
+    businessId: ID!
+    name: String
+    description: String
+  }
+
+  # memberId is the BusinessMember.id (the membership record), not the User.id
+  input RemoveMemberInput {
+    businessId: ID!
+    memberId: ID!
   }
 
   # ── Queries ────────────────────────────────────────────────────────
 
   type Query {
     healthCheck: String
-    getOwner: User!
 
     # Returns the currently authenticated user (requires JWT)
     getMe: User!
 
     # Looks up any user by their UUID (requires JWT)
     getUserById(userId: ID!): User!
+
+    # Returns all businesses the authenticated user is a member of (requires JWT)
+    getMyBusinesses: [Business!]!
+
+    # Returns all members of a business with their user profiles (requires JWT + membership)
+    getBusinessMembers(businessId: ID!): [BusinessMember!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -110,8 +158,36 @@ const typeDefs = `#graphql
     # Sends an invitation to a Manager or Employee (OWNER/MANAGER only)
     inviteEmployee(input: InviteInput!): Invitation!
 
+    # Resends a pending invitation with a fresh token + reset expiry (OWNER/MANAGER only)
+    # Use this when the invitee didn't receive the original email.
+    resendInvitation(input: InviteInput!): Invitation!
+
     # Accepts an invitation token and creates the user account + BusinessMember
     acceptInvitation(input: AcceptInvitationInput!): AuthPayload!
+
+    # Updates the authenticated user's own profile (requires JWT)
+    # email and password changes use separate dedicated mutations
+    updateUser(input: UpdateUserInput!): User!
+
+    # Changes the authenticated user's password (requires JWT)
+    # currentPassword must match before the new password is accepted
+    changePassword(input: ChangePasswordInput!): User!
+
+    # Changes the authenticated user's email address (requires JWT)
+    # Current password required to confirm identity
+    changeEmail(input: ChangeEmailInput!): User!
+
+    # ── Business mutations ———————————————————————
+
+    # Updates a business's name and/or description (OWNER or MANAGER only)
+    updateBusiness(input: UpdateBusinessInput!): Business!
+
+    # Soft-deletes a business by setting isActive to false (OWNER only)
+    deactivateBusiness(businessId: ID!): Business!
+
+    # Removes a member from a business
+    # OWNER can remove MANAGER or EMPLOYEE; MANAGER can only remove EMPLOYEE
+    removeMember(input: RemoveMemberInput!): BusinessMember!
 
   }
 `;
