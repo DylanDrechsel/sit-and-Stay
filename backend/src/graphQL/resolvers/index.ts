@@ -4,12 +4,13 @@ import { ownerResolvers } from './owner/ownerResolvers.js';
 import { customerResolvers } from './customer/customerResolvers.js';
 import { utilsResolvers } from './utils/utilsResolvers.js';
 import { userResolvers } from './user/userResolvers.js';
+import { businessResolvers } from './business/businessResolvers.js';
 
 export default {
     Query: {
         healthCheck: () => 'Server is up and running smoothly!',
-        ...ownerResolvers.Query,
         ...userResolvers.Query,
+        ...businessResolvers.Query,
     },
     Mutation: {
         ...invitationResolvers.Mutation,
@@ -17,6 +18,7 @@ export default {
         ...customerResolvers.Mutation,
         ...utilsResolvers.Mutation,
         ...userResolvers.Mutation,
+        ...businessResolvers.Mutation,
     },
     JSON: GraphQLJSON,
 };

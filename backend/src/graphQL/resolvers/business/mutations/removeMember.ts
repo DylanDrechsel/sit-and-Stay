@@ -6,7 +6,8 @@ import type { RemoveMemberInput } from '../../../../types/business.js';
 /**
  * removeMember
  *
- * Removes a member from a business. Role-based permission rules:
+ * Soft-removes a member from a business by setting their membership's isActive flag to false.
+ * Role-based permission rules:
  *
  *   - OWNER  → can remove MANAGER or EMPLOYEE
  *   - MANAGER → can only remove EMPLOYEE
@@ -17,8 +18,8 @@ import type { RemoveMemberInput } from '../../../../types/business.js';
  *   - A caller cannot remove themselves
  *   - The target must belong to the same business as specified in businessId
  *
- * Returns the removed BusinessMember record (including user profile) so the
- * frontend can confirm who was removed without a follow-up query.
+ * Returns the deactivated BusinessMember record (including user profile) so the
+ * frontend can confirm the resulting inactive state without a follow-up query.
  */
 export const removeMember = async (
     _: unknown,
@@ -48,7 +49,11 @@ export const removeMember = async (
         },
     });
 
-    if (callerMembership == null || !['OWNER', 'MANAGER'].includes(callerMembership.role)) {
+    if (
+        callerMembership == null ||
+        !callerMembership.isActive ||
+        !['OWNER', 'MANAGER'].includes(callerMembership.role)
+    ) {
         throw new GraphQLError('You do not have permission to remove members from this business.', {
             extensions: { code: 'FORBIDDEN' },
         });
@@ -60,7 +65,11 @@ export const removeMember = async (
         include: { user: true },
     });
 
-    if (targetMembership == null || targetMembership.businessId !== businessId) {
+    if (
+        targetMembership == null ||
+        !targetMembership.isActive ||
+        targetMembership.businessId !== businessId
+    ) {
         throw new GraphQLError('Member not found in this business.', {
             extensions: { code: 'NOT_FOUND' },
         });
@@ -87,9 +96,10 @@ export const removeMember = async (
         });
     }
 
-    // Delete the membership record
-    await context.prisma.businessMember.delete({ where: { id: memberId } });
-
-    // Return the snapshot of the deleted record (user is already included)
-    return targetMembership;
+    // Preserve the membership and related history while revoking business access.
+    return context.prisma.businessMember.update({
+        where: { id: memberId },
+        data: { isActive: false },
+        include: { user: true },
+    });
 };
