@@ -90,14 +90,26 @@ export const acceptInvitationSchema = z.object({
 
 /**
  * Validates input for updating the authenticated user's profile.
- * All fields are optional — only provided fields are written to the database.
- * At least one field must be present (enforced by .refine()).
+ * 
+ * Rules:
+ * - All fields are optional — only provided fields are validated and written to the database.
+ * - At least one field must be present in the request (enforced by object-level .refine()).
+ * - 'avatarUrl' accepts full absolute URLs (e.g., https://...) OR local relative paths (e.g., /uploads/...).
  */
 export const updateUserSchema = z.object({
     firstName: firstNameField.optional(),
     lastName: lastNameField.optional(),
-    phone: phoneField.optional(),
-    avatarUrl: z.string().trim().url('Invalid avatar URL').optional(),
+    phone: z.union([phoneField, z.literal(''), z.null()]).optional(),
+    avatarUrl: z.union([
+        z.string()
+            .trim()
+            .refine(
+                (val) => val.startsWith('/') || z.string().url().safeParse(val).success, 
+                { message: 'Invalid avatar URL or path' }
+            ),
+        z.literal(''),
+        z.null()
+    ]).optional(),
 }).refine(
     (data) => Object.values(data).some((v) => v !== undefined),
     { message: 'At least one field must be provided to update' },
