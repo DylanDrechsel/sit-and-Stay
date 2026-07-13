@@ -4,8 +4,8 @@
 export interface UpdateUserInput {
     firstName?: string;
     lastName?: string;
-    phone?: string;
-    avatarUrl?: string;
+    phone?: string | null;
+    avatarUrl?: string | null;
 }
 
 export interface ChangePasswordInput {
