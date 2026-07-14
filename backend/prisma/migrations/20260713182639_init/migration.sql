@@ -106,11 +106,34 @@ CREATE TABLE "ServiceOffering" (
     "businessId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT NOT NULL,
-    "basePrice" DECIMAL(10,2) NOT NULL,
     "durationMinutes" INTEGER NOT NULL,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "ServiceOffering_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ServicePackage" (
+    "id" TEXT NOT NULL,
+    "serviceOfferingId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "sessionsCount" INTEGER NOT NULL DEFAULT 1,
+    "pricePerSession" DECIMAL(10,2) NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+
+    CONSTRAINT "ServicePackage_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ServiceOfferingAddOn" (
+    "id" TEXT NOT NULL,
+    "serviceOfferingId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "pricePerSession" DECIMAL(10,2) NOT NULL,
+    "perSession" BOOLEAN NOT NULL DEFAULT true,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+
+    CONSTRAINT "ServiceOfferingAddOn_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -289,6 +312,12 @@ ALTER TABLE "Pet" ADD CONSTRAINT "Pet_customerId_fkey" FOREIGN KEY ("customerId"
 
 -- AddForeignKey
 ALTER TABLE "ServiceOffering" ADD CONSTRAINT "ServiceOffering_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServicePackage" ADD CONSTRAINT "ServicePackage_serviceOfferingId_fkey" FOREIGN KEY ("serviceOfferingId") REFERENCES "ServiceOffering"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceOfferingAddOn" ADD CONSTRAINT "ServiceOfferingAddOn_serviceOfferingId_fkey" FOREIGN KEY ("serviceOfferingId") REFERENCES "ServiceOffering"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "EmployeeAvailability" ADD CONSTRAINT "EmployeeAvailability_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "BusinessMember"("id") ON DELETE CASCADE ON UPDATE CASCADE;

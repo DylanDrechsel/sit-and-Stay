@@ -699,6 +699,9 @@ The following handlers are implemented and registered through `resolvers/busines
 ## 13. Key Commands (Quick Reference)
 
 ```bash
+# Start Docker
+sudo service docker start
+
 # Start the database (Docker)
 docker compose up -d
 
