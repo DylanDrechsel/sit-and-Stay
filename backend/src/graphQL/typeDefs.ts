@@ -52,6 +52,27 @@ const typeDefs = `#graphql
     user: User!          # Full profile of the member
   }
 
+  # A service a business advertises (e.g., Dog Walking — 30 min)
+  type ServiceOffering {
+    id: ID!
+    businessId: ID!
+    title: String!
+    description: String!
+    durationMinutes: Int!
+    isActive: Boolean!
+    addOns: [ServiceOfferingAddOn!]!
+  }
+
+  # An optional extra charge attached to a ServiceOffering (e.g., "Additional Dog")
+  type ServiceOfferingAddOn {
+    id: ID!
+    serviceOfferingId: ID!
+    title: String!
+    pricePerSession: Float!
+    perSession: Boolean!
+    isActive: Boolean!
+  }
+
   # ── Inputs ─────────────────────────────────────────────────────────
 
   input RegisterCustomerInput {
@@ -126,6 +147,42 @@ const typeDefs = `#graphql
     memberId: ID!
   }
 
+  # ── Service inputs ————————————————————————————————
+
+  input CreateServiceOfferingInput {
+    businessId: ID!
+    title: String!
+    description: String!
+    durationMinutes: Int!
+  }
+
+  # serviceOfferingId is required; all other fields are optional (partial update).
+  # At least one of title, description, durationMinutes, or isActive must be provided.
+  input UpdateServiceOfferingInput {
+    serviceOfferingId: ID!
+    title: String
+    description: String
+    durationMinutes: Int
+    isActive: Boolean
+  }
+
+  input CreateServiceAddOnInput {
+    serviceOfferingId: ID!
+    title: String!
+    pricePerSession: Float!
+    perSession: Boolean
+  }
+
+  # serviceAddOnId is required; all other fields are optional (partial update).
+  # At least one of title, pricePerSession, perSession, or isActive must be provided.
+  input UpdateServiceAddOnInput {
+    serviceAddOnId: ID!
+    title: String
+    pricePerSession: Float
+    perSession: Boolean
+    isActive: Boolean
+  }
+
   # ── Queries ────────────────────────────────────────────────────────
 
   type Query {
@@ -145,6 +202,18 @@ const typeDefs = `#graphql
 
     # Returns all inactive members of a business with their user profiles (requires JWT + active membership)
     getInactiveBusinessMembers(businessId: ID!): [BusinessMember!]!
+
+    # Returns a single service offering with its add-ons (requires JWT + active business membership)
+    getServiceOffering(serviceOfferingId: ID!): ServiceOffering!
+
+    # Returns all service offerings (active and inactive) for a business (requires JWT + active business membership)
+    getServiceOfferings(businessId: ID!): [ServiceOffering!]!
+
+    # Returns a single service add-on (requires JWT + active business membership)
+    getServiceAddOn(serviceAddOnId: ID!): ServiceOfferingAddOn!
+
+    # Returns all add-ons (active and inactive) for a service offering (requires JWT + active business membership)
+    getServiceAddOns(serviceOfferingId: ID!): [ServiceOfferingAddOn!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -193,6 +262,25 @@ const typeDefs = `#graphql
     # OWNER can remove MANAGER or EMPLOYEE; MANAGER can only remove EMPLOYEE
     removeMember(input: RemoveMemberInput!): BusinessMember!
 
+    # ── Service mutations ————————————————————————
+
+    # Creates a service offering under a business (OWNER or MANAGER only)
+    createServiceOffering(input: CreateServiceOfferingInput!): ServiceOffering!
+
+    # Partial update of a service offering (OWNER or MANAGER only)
+    updateServiceOffering(input: UpdateServiceOfferingInput!): ServiceOffering!
+
+    # Soft-deletes a service offering by setting isActive to false (OWNER or MANAGER only)
+    deleteServiceOffering(serviceOfferingId: ID!): ServiceOffering!
+
+    # Creates an add-on under a service offering (OWNER or MANAGER only)
+    createServiceAddOn(input: CreateServiceAddOnInput!): ServiceOfferingAddOn!
+
+    # Partial update of a service add-on (OWNER or MANAGER only)
+    updateServiceAddOn(input: UpdateServiceAddOnInput!): ServiceOfferingAddOn!
+
+    # Soft-deletes a service add-on by setting isActive to false (OWNER or MANAGER only)
+    deleteServiceAddOn(serviceAddOnId: ID!): ServiceOfferingAddOn!
   }
 `;
 

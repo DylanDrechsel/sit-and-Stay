@@ -14,6 +14,11 @@ import { InvitationEmailPayload } from '../types/invitation.js';
 //   EMAIL_FROM     — "From" display name + address (e.g. PetSitterPro <noreply@petsitterpro.com>)
 //   APP_BASE_URL   — Frontend base URL for building invite links (e.g. http://localhost:3000)
 
+/**
+ * Creates a nodemailer transporter using SMTP credentials from environment variables.
+ * If any required env vars are missing, returns null (development fallback).
+ * @returns A nodemailer transporter or null if SMTP is not configured
+ */
 const createTransporter = () => {
     const host = process.env.EMAIL_HOST;
     const port = parseInt(process.env.EMAIL_PORT ?? '587', 10);
@@ -37,6 +42,11 @@ const transporter = createTransporter();
 
 // ── HTML Template ─────────────────────────────────────────────────────────────
 
+/**
+ * Builds the HTML content for the invitation email.
+ * @param payload - The invitation email payload
+ * @returns The HTML string for the email
+ */
 const buildInvitationHtml = ({
     businessName,
     role,
@@ -142,6 +152,7 @@ const buildInvitationHtml = ({
  * link to the console so you can test without a real SMTP server.
  *
  * @param payload - Recipient email, business name, role, token, and expiry
+ * @returns A promise that resolves when the email is sent (or logged in dev)
  */
 export const sendInvitationEmail = async (payload: InvitationEmailPayload): Promise<void> => {
     const { toEmail, businessName, role, token, expiresAt } = payload;

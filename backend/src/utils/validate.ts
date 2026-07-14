@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 // ── Reusable field schemas ─────────────────────────────────────────────────
 
+/**
+ * Reusable Zod schema for validating email addresses.
+ * Normalizes input by trimming whitespace and converting to lowercase.
+ * Ensures the email is non-empty and follows standard email format.
+ */
 const emailField = z
     .string()
     .trim()
@@ -168,6 +173,72 @@ export const removeMemberSchema = z.object({
     businessId: businessIdField,
     memberId: memberIdField,
 });
+
+// ── Service schemas ────────────────────────────────────────────────────────
+
+// Reusable field — service operations require a valid ServiceOffering.id
+const serviceOfferingIdField = z.string().uuid('Invalid service offering ID');
+
+// Reusable field — add-on operations require a valid ServiceOfferingAddOn.id
+const serviceAddOnIdField = z.string().uuid('Invalid service add-on ID');
+
+// Reusable field — prices are positive amounts with at most 2 decimal places
+const priceField = z.number().positive('Price must be greater than 0')
+    .refine((value) => Number.isInteger(value * 100), 'Price must have at most 2 decimal places');
+
+/**
+ * Validates input for creating a new ServiceOffering under a business.
+ */
+export const createServiceOfferingSchema = z.object({
+    businessId: businessIdField,
+    title: z.string().trim().min(1, 'Title is required').max(100, 'Title too long'),
+    description: z.string().trim().min(1, 'Description is required').max(1000, 'Description too long'),
+    durationMinutes: z.number().int('Duration must be a whole number').positive('Duration must be greater than 0'),
+});
+
+/**
+ * Validates input for updating a ServiceOffering.
+ * serviceOfferingId is required; all other fields are optional.
+ * At least one of title, description, durationMinutes, or isActive must be provided.
+ */
+export const updateServiceOfferingSchema = z.object({
+    serviceOfferingId: serviceOfferingIdField,
+    title: z.string().trim().min(1, 'Title cannot be empty').max(100, 'Title too long').optional(),
+    description: z.string().trim().min(1, 'Description cannot be empty').max(1000, 'Description too long').optional(),
+    durationMinutes: z.number().int('Duration must be a whole number').positive('Duration must be greater than 0').optional(),
+    isActive: z.boolean().optional(),
+}).refine(
+    (data) => data.title !== undefined || data.description !== undefined
+        || data.durationMinutes !== undefined || data.isActive !== undefined,
+    { message: 'At least one field must be provided to update' },
+);
+
+/**
+ * Validates input for creating a new ServiceOfferingAddOn under a ServiceOffering.
+ */
+export const createServiceAddOnSchema = z.object({
+    serviceOfferingId: serviceOfferingIdField,
+    title: z.string().trim().min(1, 'Title is required').max(100, 'Title too long'),
+    pricePerSession: priceField,
+    perSession: z.boolean().optional(),
+});
+
+/**
+ * Validates input for updating a ServiceOfferingAddOn.
+ * serviceAddOnId is required; all other fields are optional.
+ * At least one of title, pricePerSession, perSession, or isActive must be provided.
+ */
+export const updateServiceAddOnSchema = z.object({
+    serviceAddOnId: serviceAddOnIdField,
+    title: z.string().trim().min(1, 'Title cannot be empty').max(100, 'Title too long').optional(),
+    pricePerSession: priceField.optional(),
+    perSession: z.boolean().optional(),
+    isActive: z.boolean().optional(),
+}).refine(
+    (data) => data.title !== undefined || data.pricePerSession !== undefined
+        || data.perSession !== undefined || data.isActive !== undefined,
+    { message: 'At least one field must be provided to update' },
+);
 
 // ── Helper ─────────────────────────────────────────────────────────────────
 
