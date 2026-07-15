@@ -64,6 +64,47 @@ enum LedgerReferenceType {
   ADJUSTMENT
 }
 
+// How a user account authenticates (welcome/sign-in screen: Apple, Google, email)
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  APPLE
+}
+
+// Biological sex of a pet — drives the Neutered/Spayed label on the pet profile
+enum PetSex {
+  MALE
+  FEMALE
+}
+
+// Category a service offering belongs to (owner "Create service offering" screen)
+enum ServiceCategory {
+  WALKING
+  BOARDING
+  DROP_IN
+  DAY_CARE
+  TRAINING
+  GROOMING
+  HOUSE_SITTING
+}
+
+// Sitter background-check state (employee onboarding: invite → background check → approved)
+enum BackgroundCheckStatus {
+  NOT_STARTED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Overall pet disposition recorded on a job's report card ("😄 Mood: Very Happy")
+enum PetMood {
+  VERY_HAPPY
+  HAPPY
+  CALM
+  ANXIOUS
+  LOW_ENERGY
+}
+
 // ----------------------------------------------------------------------
 // CORE IDENTITY & MULTI-TENANCY
 // ----------------------------------------------------------------------
@@ -71,7 +112,8 @@ enum LedgerReferenceType {
 model User {
   id            String           @id @default(uuid())
   email         String           @unique
-  passwordHash  String
+  passwordHash  String?          // null for OAuth-only accounts (Google / Apple sign-in)
+  authProvider  AuthProvider     @default(EMAIL)
   firstName     String
   lastName      String
   phone         String?
@@ -83,6 +125,7 @@ model User {
   memberships   BusinessMember[]
   customer      CustomerProfile?
   messages      Message[]
+  jobUpdates    JobUpdate[]
 }
 
 model Business {
@@ -90,6 +133,20 @@ model Business {
   name          String
   description   String?
   isActive      Boolean            @default(true)
+  isVerified    Boolean            @default(false)  // "Verified" badge on business detail / listings
+  heroPhotoUrl  String?                              // hero image on the business profile
+
+  // Human-readable location shown alongside the PostGIS point (e.g. "Ballard", "Seattle")
+  addressLine   String?
+  city          String?
+  neighborhood  String?
+
+  // Flat per-booking fee surfaced at checkout ("flat $6 service fee")
+  serviceFeeAmount Decimal?         @db.Decimal(10, 2)
+
+  // Denormalized review aggregates for fast list rendering ("★ 4.9 · 212 reviews")
+  avgRating     Decimal?           @db.Decimal(3, 2)
+  reviewCount   Int                @default(0)
 
   // Geospatial Data via PostGIS
   location      Unsupported("geometry(Point, 4326)")?
@@ -114,7 +171,10 @@ model BusinessMember {
   userId        String
   businessId    String
   role          BusinessRole
+  title         String?                        // display role, e.g. "Walker & drop-ins", "Boarding lead"
   isActive      Boolean                @default(true)
+  backgroundCheckStatus BackgroundCheckStatus  @default(NOT_STARTED)
+  onboardingCompletedAt DateTime?              // set when the invite → onboarding flow finishes
   joinedAt      DateTime               @default(now())
 
   user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -151,6 +211,7 @@ model CustomerProfile {
   id            String    @id @default(uuid())
   userId        String    @unique
   address       String?
+  city          String?
 
   // Geospatial Data via PostGIS
   location      Unsupported("geometry(Point, 4326)")?
@@ -171,8 +232,19 @@ model Pet {
   type             PetType
   breed            String?
   age              Int?
+  sex              PetSex?
+  weightLb         Decimal?        @db.Decimal(5, 2)  // shown as "64 lb", "9 lb"
+  photoUrl         String?
+  isNeutered       Boolean         @default(false)    // "Neutered" / "Spayed" badge
+  isMicrochipped   Boolean         @default(false)    // "Microchipped" badge
   medicalNotes     String?
   careInstructions String?
+  homeAccessNotes  String?                            // e.g. "Front-clip harness, hall closet" (non-secret access notes)
+
+  // Vet contact, shared with the assigned sitter (pet profile screen)
+  vetName          String?
+  vetClinic        String?
+  vetPhone         String?
 
   customer         CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
   jobs             Job[]           @relation("JobPets")
@@ -186,8 +258,11 @@ model ServiceOffering {
   id              String   @id @default(uuid())
   businessId      String
   title           String
+  category        ServiceCategory?              // optional for now; backfill existing rows before making required
   description     String
+  basePrice       Decimal? @db.Decimal(10, 2)   // headline "BASE PRICE" / "from $X"; packages still price individually
   durationMinutes Int
+  features        String[]                       // badge chips e.g. "GPS tracked", "Photo updates", "Insured"
   isActive        Boolean  @default(true)
 
   // Packages and add-ons allow flexible pricing per offering
@@ -235,20 +310,33 @@ model EmployeeAvailability {
 
 model Job {
   id                  String          @id @default(uuid())
+  jobNumber           Int             @unique @default(autoincrement())  // human-readable "Job #1382"
   businessId          String
   customerId          String
   serviceOfferingId   String
   assigneeId          String?
 
   status              JobStatus       @default(PENDING)
+  respondBy           DateTime?       // request acceptance deadline ("RESPOND BY 7 PM")
+
+  // Session position within a multi-session package booking ("walk 2 of 4")
+  sessionNumber       Int?
+  totalSessions       Int?
+
   scheduledStartTime  DateTime
   scheduledEndTime    DateTime
-  actualStartTime     DateTime?
-  actualEndTime       DateTime?
+  actualStartTime     DateTime?       // clock-in
+  actualEndTime       DateTime?       // clock-out
+  acceptedAt          DateTime?       // business accepted the request
+  assignedAt          DateTime?       // a sitter was assigned
+  distanceMeters      Int?            // route distance walked during the job ("0.8 mi walked so far")
   specialInstructions String?
 
   price               Decimal         @db.Decimal(10, 2)
   tipAmount           Decimal?        @db.Decimal(10, 2)
+
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   business            Business        @relation(fields: [businessId], references: [id])
   customer            CustomerProfile @relation(fields: [customerId], references: [id])
@@ -258,6 +346,8 @@ model Job {
   ledgerEntries       LedgerEntry[]
   review              Review?
   conversation        Conversation?
+  updates             JobUpdate[]
+  reportCard          ReportCard?
 
   @@index([businessId])
   @@index([customerId])
@@ -270,6 +360,8 @@ model Review {
   customerId String
   rating     Int             // 1 to 5 scale
   comment    String?
+  tags       String[]        // quick-select highlights e.g. "On time", "Great photos", "Caring & gentle"
+  isPublic   Boolean         @default(true)  // "Your review is public on the business's profile"
   createdAt  DateTime        @default(now())
 
   job        Job             @relation(fields: [jobId], references: [id])
@@ -277,6 +369,43 @@ model Review {
   customer   CustomerProfile @relation(fields: [customerId], references: [id])
 
   @@index([businessId, rating])
+}
+
+// ----------------------------------------------------------------------
+// JOB ACTIVITY — LIVE UPDATES & REPORT CARDS
+// ----------------------------------------------------------------------
+// A JobUpdate is a single timestamped post the assigned sitter shares while a
+// job is in progress (a photo, a note, or both) — the "Updates" feed on the
+// live job-tracking screen. A ReportCard is the single end-of-job summary the
+// sitter fills out at clock-out ("report card after every session").
+
+model JobUpdate {
+  id        String   @id @default(uuid())
+  jobId     String
+  authorId  String   // User who posted — typically the assigned sitter
+  note      String?  @db.Text
+  photoUrl  String?
+  createdAt DateTime @default(now())
+
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+
+  @@index([jobId, createdAt(sort: Desc)])
+}
+
+model ReportCard {
+  id         String   @id @default(uuid())
+  jobId      String   @unique
+  mood       PetMood?
+  peeCount   Int      @default(0)
+  poopCount  Int      @default(0)
+  ateFood    Boolean  @default(false)
+  drankWater Boolean  @default(false)
+  gaveTreat  Boolean  @default(false)
+  summary    String?  @db.Text  // free-text recap surfaced to the owner after the job
+  createdAt  DateTime @default(now())
+
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
 // ----------------------------------------------------------------------
