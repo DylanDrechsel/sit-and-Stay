@@ -243,6 +243,11 @@ All IDs use `uuid()`. Models with timestamps have both `createdAt` and `updatedA
 | `JobStatus`          | `PENDING`, `ACCEPTED`, `ASSIGNED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` |
 | `EntryType`          | `CREDIT`, `DEBIT`                                                   |
 | `LedgerReferenceType`| `JOB_PAYMENT`, `TIP`, `PAYOUT`, `REFUND`, `ADJUSTMENT`             |
+| `AuthProvider`       | `EMAIL`, `GOOGLE`, `APPLE` — how a `User` authenticates            |
+| `PetSex`             | `MALE`, `FEMALE`                                                    |
+| `ServiceCategory`    | `WALKING`, `BOARDING`, `DROP_IN`, `DAY_CARE`, `TRAINING`, `GROOMING`, `HOUSE_SITTING` |
+| `BackgroundCheckStatus`| `NOT_STARTED`, `PENDING`, `APPROVED`, `REJECTED` — sitter onboarding |
+| `PetMood`            | `VERY_HAPPY`, `HAPPY`, `CALM`, `ANXIOUS`, `LOW_ENERGY` — report-card mood |
 
 ---
 
@@ -252,19 +257,21 @@ The global identity record for any person on the platform (customer or business 
 
 | Field          | Type        | Notes                            |
 |----------------|-------------|----------------------------------|
-| `id`           | String      | uuid, primary key                |
-| `email`        | String      | unique                           |
-| `passwordHash` | String      | bcrypt hash — never store plain  |
-| `firstName`    | String      |                                  |
-| `lastName`     | String      |                                  |
-| `phone`        | String?     | optional                         |
-| `avatarUrl`    | String?     | optional profile photo URL       |
-| `globalRole`   | GlobalRole  | `USER` or `ADMIN`, default `USER`|
+| `id`           | String       | uuid, primary key                |
+| `email`        | String       | unique                           |
+| `passwordHash` | String?      | bcrypt hash; **nullable** — `null` for OAuth-only accounts (Google/Apple) |
+| `authProvider` | AuthProvider | default `EMAIL`; `GOOGLE`/`APPLE` for social sign-in |
+| `firstName`    | String       |                                  |
+| `lastName`     | String       |                                  |
+| `phone`        | String?      | optional                         |
+| `avatarUrl`    | String?      | optional profile photo URL       |
+| `globalRole`   | GlobalRole   | `USER` or `ADMIN`, default `USER`|
 
 **Relations:**
 - `memberships` → `BusinessMember[]` — which businesses this user belongs to (and in what role)
 - `customer` → `CustomerProfile?` — exists if user has booked as a pet owner
 - `messages` → `Message[]` — all messages sent by this user
+- `jobUpdates` → `JobUpdate[]` — live photo/note updates this user posted while working a job
 
 ---
 
@@ -274,11 +281,22 @@ A pet sitting business (the tenant in the multi-tenant model).
 
 | Field         | Type       | Notes                                               |
 |---------------|------------|-----------------------------------------------------|
-| `id`          | String     | uuid, primary key                                   |
-| `name`        | String     |                                                     |
-| `description` | String?    | optional                                            |
-| `isActive`    | Boolean    | default `true`; indexed for filtering               |
-| `location`    | geometry?  | PostGIS Point (lng, lat) for geospatial search      |
+| `id`             | String     | uuid, primary key                                |
+| `name`           | String     |                                                  |
+| `description`    | String?    | optional                                         |
+| `isActive`       | Boolean    | default `true`; indexed for filtering            |
+| `isVerified`     | Boolean    | default `false`; drives the "Verified" badge     |
+| `heroPhotoUrl`   | String?    | hero image on the business profile               |
+| `addressLine`    | String?    | human-readable street address                    |
+| `city`           | String?    | e.g. "Seattle"                                   |
+| `neighborhood`   | String?    | e.g. "Ballard"                                   |
+| `serviceFeeAmount`| Decimal?  | precision `(10,2)`; flat per-booking checkout fee |
+| `avgRating`      | Decimal?   | precision `(3,2)`; denormalized review average   |
+| `reviewCount`    | Int        | default `0`; denormalized review count           |
+| `location`       | geometry?  | PostGIS Point (lng, lat) for geospatial search   |
+
+> `avgRating`/`reviewCount` are denormalized for fast list rendering — keep them in sync whenever a
+> `Review` is created, updated, or deleted (they are not auto-maintained by Prisma).
 
 **Relations:**
 - `members` → `BusinessMember[]`
@@ -304,7 +322,10 @@ A user can be a member of multiple businesses, but only one role per business (`
 | `userId`    | String       | FK → `users.id`, cascade delete     |
 | `businessId`| String       | FK → `businesses.id`, cascade delete|
 | `role`      | BusinessRole | `OWNER`, `MANAGER`, or `EMPLOYEE`   |
+| `title`     | String?      | display role, e.g. "Walker & drop-ins", "Boarding lead" |
 | `isActive`  | Boolean      | default `true`; set to `false` when the member is removed |
+| `backgroundCheckStatus`| BackgroundCheckStatus | default `NOT_STARTED`; sitter onboarding |
+| `onboardingCompletedAt`| DateTime? | set when the invite → onboarding flow finishes |
 | `joinedAt`  | DateTime     | default now                         |
 
 **Relations:**
@@ -348,6 +369,7 @@ Extended profile for users who book pet care services. One-to-one with `User`.
 | `id`       | String    | uuid, primary key                              |
 | `userId`   | String    | FK → `users.id`, unique, cascade delete        |
 | `address`  | String?   | optional text address                          |
+| `city`     | String?   | e.g. "Seattle"                                 |
 | `location` | geometry? | PostGIS Point for proximity-based search       |
 
 **Relations:**
@@ -373,8 +395,17 @@ A pet belonging to a customer.
 | `type`            | PetType        | enum                           |
 | `breed`           | String?        | optional                       |
 | `age`             | Int?           | optional, in years             |
+| `sex`             | PetSex?        | optional; `MALE`/`FEMALE`      |
+| `weightLb`        | Decimal?       | precision `(5,2)`; shown as "64 lb" |
+| `photoUrl`        | String?        | optional pet photo             |
+| `isNeutered`      | Boolean        | default `false`; "Neutered"/"Spayed" badge |
+| `isMicrochipped`  | Boolean        | default `false`; "Microchipped" badge |
 | `medicalNotes`    | String?        | optional                       |
 | `careInstructions`| String?        | optional                       |
+| `homeAccessNotes` | String?        | optional; non-secret access notes (e.g. "harness in hall closet"). Do **not** store lockbox codes here — those are shared per job |
+| `vetName`         | String?        | optional; shared with assigned sitter |
+| `vetClinic`       | String?        | optional                       |
+| `vetPhone`        | String?        | optional                       |
 
 **Relations:**
 - `customer` → `CustomerProfile`
@@ -384,17 +415,72 @@ A pet belonging to a customer.
 
 ### Model: `ServiceOffering` → table `service_offerings`
 
-A service that a business advertises (e.g., Dog Walking — $25 — 60 min).
+A service that a business advertises (e.g., Dog Walking — 30 min). Carries an optional headline
+`basePrice` ("from $X"), while detailed pricing is still expressed through its `packages` and
+`addOns` relations.
 
 | Field            | Type    | Notes                                |
 |------------------|---------|--------------------------------------|
 | `id`             | String  | uuid, primary key                    |
 | `businessId`     | String  | FK → `businesses.id`, cascade delete |
 | `title`          | String  | e.g., "Dog Walking"                  |
+| `category`       | ServiceCategory? | optional for now; backfill existing rows before making it required |
 | `description`    | String  |                                      |
-| `basePrice`      | Decimal | USD, precision `(10,2)`              |
+| `basePrice`      | Decimal? | precision `(10,2)`; headline "from $X" price. Packages still price individually |
 | `durationMinutes`| Int     | expected duration                    |
+| `features`       | String[] | badge chips, e.g. `["GPS tracked", "Photo updates", "Insured"]` |
 | `isActive`       | Boolean | default `true`                       |
+| `packages`       | ServicePackage[] | pricing tiers for this offering (see below) |
+| `addOns`         | ServiceOfferingAddOn[] | optional extra charges for this offering (see below) |
+
+> **GraphQL/resolver status:** `typeDefs.ts` declares a full CRUD surface for `ServiceOffering`
+> (`ServiceOffering` type, `Create`/`UpdateServiceOfferingInput`, `getServiceOffering(s)`,
+> `create`/`update`/`deleteServiceOffering`) and `src/utils/validate.ts` has matching Zod schemas
+> (`createServiceOfferingSchema`, `updateServiceOfferingSchema`), but **no resolver files exist**
+> for any of it — there is no `resolvers/service/` domain and `resolvers/index.ts` does not
+> reference one. These SDL fields have no backing resolver map entries; calling them will fail
+> at query time (or break schema construction, depending on Apollo's strictness setting). Treat
+> this as declared-but-unimplemented until resolvers are added following §12.
+
+---
+
+### Model: `ServicePackage` → table `service_packages`
+
+A priced tier for a `ServiceOffering` (e.g., "Single Session" vs "4 Session Package").
+
+| Field               | Type    | Notes                                          |
+|---------------------|---------|-------------------------------------------------|
+| `id`                | String  | uuid, primary key                                |
+| `serviceOfferingId` | String  | FK → `service_offerings.id`, cascade delete      |
+| `title`             | String  | e.g., "Single Session"                           |
+| `sessionsCount`     | Int     | default `1`                                      |
+| `pricePerSession`   | Decimal | USD, precision `(10,2)`                          |
+| `isActive`          | Boolean | default `true`                                   |
+
+> **GraphQL/resolver status:** not exposed anywhere in `typeDefs.ts` — no type, input, query, or
+> mutation references `ServicePackage`. Only reachable today via the seed data created inside
+> `registerOwner.ts`'s transaction. No CRUD surface exists for this model.
+
+---
+
+### Model: `ServiceOfferingAddOn` → table `service_offering_add_ons`
+
+An optional extra charge attached to a `ServiceOffering` (e.g., "Additional Dog").
+
+| Field               | Type    | Notes                                          |
+|---------------------|---------|-------------------------------------------------|
+| `id`                | String  | uuid, primary key                                |
+| `serviceOfferingId` | String  | FK → `service_offerings.id`, cascade delete      |
+| `title`             | String  | e.g., "Additional Dog"                           |
+| `pricePerSession`   | Decimal | USD, precision `(10,2)`                          |
+| `perSession`        | Boolean | default `true` — whether the charge is per session or flat |
+| `isActive`          | Boolean | default `true`                                   |
+
+> **GraphQL/resolver status:** same situation as `ServiceOffering` above — `typeDefs.ts` declares
+> a `ServiceOfferingAddOn` type, `Create`/`UpdateServiceAddOnInput`, and
+> `get`/`create`/`update`/`deleteServiceAddOn` operations, and `validate.ts` has matching Zod
+> schemas, but no `resolvers/service/` files or `resolvers/index.ts` wiring exist. Declared but
+> unimplemented.
 
 ---
 
@@ -420,18 +506,27 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 | Field                | Type          | Notes                                      |
 |----------------------|---------------|--------------------------------------------|
 | `id`                 | String        | uuid, primary key                          |
+| `jobNumber`          | Int           | unique, autoincrement; human-readable "Job #1382" |
 | `businessId`         | String        | FK → `businesses.id`                       |
 | `customerId`         | String        | FK → `customer_profiles.id`                |
 | `serviceOfferingId`  | String        | FK → `service_offerings.id`                |
 | `assigneeId`         | String?       | FK → `business_members.id`, optional       |
 | `status`             | JobStatus     | default `PENDING`                          |
+| `respondBy`          | DateTime?     | request-acceptance deadline ("RESPOND BY 7 PM") |
+| `sessionNumber`      | Int?          | position within a multi-session package ("walk **2** of 4") |
+| `totalSessions`      | Int?          | total sessions in the package ("walk 2 of **4**") |
 | `scheduledStartTime` | DateTime      |                                            |
 | `scheduledEndTime`   | DateTime      |                                            |
-| `actualStartTime`    | DateTime?     | set when job actually begins               |
-| `actualEndTime`      | DateTime?     | set when job actually ends                 |
+| `actualStartTime`    | DateTime?     | clock-in — set when job actually begins    |
+| `actualEndTime`      | DateTime?     | clock-out — set when job actually ends     |
+| `acceptedAt`         | DateTime?     | when the business accepted the request     |
+| `assignedAt`         | DateTime?     | when a sitter was assigned                 |
+| `distanceMeters`     | Int?          | route distance walked ("0.8 mi walked")    |
 | `specialInstructions`| String?       | optional customer notes                    |
 | `price`              | Decimal       | USD, precision `(10,2)`                    |
 | `tipAmount`          | Decimal?      | USD, precision `(10,2)`, set on completion |
+| `createdAt`          | DateTime      | default now (serves as the "Requested" timestamp) |
+| `updatedAt`          | DateTime      | auto-updated                               |
 
 **Relations:**
 - `business` → `Business`
@@ -442,6 +537,8 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 - `ledgerEntries` → `LedgerEntry[]`
 - `review` → `Review?`
 - `conversation` → `Conversation?`
+- `updates` → `JobUpdate[]` — live photo/note feed during the job
+- `reportCard` → `ReportCard?` — single end-of-job summary
 
 ---
 
@@ -457,8 +554,48 @@ One review per completed job. Links the job, the business being reviewed, and th
 | `customerId`| String         | FK → `customer_profiles.id`      |
 | `rating`    | Int            | 1–5 stars                        |
 | `comment`   | String?        | optional                         |
+| `tags`      | String[]       | quick-select highlights, e.g. `["On time", "Great photos"]` |
+| `isPublic`  | Boolean        | default `true`; shown on the business's public profile |
 
 **Indexes:** `(businessId, rating)` — for sorted/filtered review queries
+
+---
+
+### Model: `JobUpdate` → table `job_updates`
+
+A single timestamped post the assigned sitter shares while a job is in progress — the "Updates"
+feed on the live job-tracking screen. A job has many updates.
+
+| Field       | Type      | Notes                                          |
+|-------------|-----------|------------------------------------------------|
+| `id`        | String    | uuid, primary key                              |
+| `jobId`     | String    | FK → `jobs.id`, cascade delete                 |
+| `authorId`  | String    | FK → `users.id`; the poster (typically the assigned sitter) |
+| `note`      | String?   | optional text (`@db.Text`)                     |
+| `photoUrl`  | String?   | optional photo                                 |
+| `createdAt` | DateTime  | default now                                    |
+
+**Indexes:** `(jobId, createdAt desc)` — for reverse-chronological feed paging
+
+---
+
+### Model: `ReportCard` → table `report_cards`
+
+The single end-of-job summary the sitter fills out at clock-out ("report card after every session").
+One-to-one with `Job` (`jobId` is unique).
+
+| Field       | Type      | Notes                                          |
+|-------------|-----------|------------------------------------------------|
+| `id`        | String    | uuid, primary key                              |
+| `jobId`     | String    | FK → `jobs.id`, unique, cascade delete         |
+| `mood`      | PetMood?  | optional; "😄 Mood: Very Happy"                |
+| `peeCount`  | Int       | default `0`                                    |
+| `poopCount` | Int       | default `0`                                    |
+| `ateFood`   | Boolean   | default `false`                                |
+| `drankWater`| Boolean   | default `false`                                |
+| `gaveTreat` | Boolean   | default `false`                                |
+| `summary`   | String?   | free-text recap surfaced to the owner (`@db.Text`) |
+| `createdAt` | DateTime  | default now                                    |
 
 ---
 
@@ -547,9 +684,17 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 ### Resolver Registration Status
 
-The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` stay in lockstep.
-The root resolver map explicitly spreads the user and business query and mutation barrels, so the
-declared business operations below are callable. `registerOwner` is registered only as a mutation.
+The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` are expected to stay
+in lockstep, but **currently do not** for the service domain. The root resolver map explicitly
+spreads the user and business query and mutation barrels, so the declared user/business operations
+below are callable. `registerOwner` is registered only as a mutation.
+
+> **Known gap:** `typeDefs.ts` declares a full CRUD surface for `ServiceOffering` and
+> `ServiceOfferingAddOn` (5 queries/mutations each — see the tables below) and `validate.ts` has
+> matching Zod schemas, but there is no `resolvers/service/` domain and `resolvers/index.ts` does
+> not spread one. These SDL fields have zero backing resolver functions. Building the service
+> domain (queries + mutations + barrel + wiring into `resolvers/index.ts`) per the §12 checklist
+> is the next step before this feature is usable.
 
 ### Declared Queries
 
@@ -561,6 +706,10 @@ declared business operations below are callable. `registerOwner` is registered o
 | `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` — returns active memberships only |
 | `getBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getBusinessMembers.ts` |
 | `getInactiveBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getInactiveBusinessMembers.ts` |
+| `getServiceOffering` ⚠️ | `serviceOfferingId: ID!` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists. Calling this will error/no-op.** |
+| `getServiceOfferings` ⚠️ | `businessId: ID!` | `[ServiceOffering!]!` | — | **Declared in SDL only — no resolver file exists.** |
+| `getServiceAddOn` ⚠️ | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
+| `getServiceAddOns` ⚠️ | `serviceOfferingId: ID!` | `[ServiceOfferingAddOn!]!` | — | **Declared in SDL only — no resolver file exists.** |
 
 ### Declared Mutations
 
@@ -578,6 +727,12 @@ declared business operations below are callable. `registerOwner` is registered o
 | `updateBusiness`    | `UpdateBusinessInput`    | `Business!`        | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/updateBusiness.ts` |
 | `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (active OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
 | `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` — sets `isActive` to `false`; does not delete the row |
+| `createServiceOffering` ⚠️ | `CreateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
+| `updateServiceOffering` ⚠️ | `UpdateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
+| `deleteServiceOffering` ⚠️ | `serviceOfferingId: ID!` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
+| `createServiceAddOn` ⚠️ | `CreateServiceAddOnInput` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
+| `updateServiceAddOn` ⚠️ | `UpdateServiceAddOnInput` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
+| `deleteServiceAddOn` ⚠️ | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
 
 ### GraphQL Input Types
 
@@ -593,6 +748,10 @@ declared business operations below are callable. `registerOwner` is registered o
 | `ChangeEmailInput` | `newEmail`, `password` | Confirms the password and normalizes the new email to lowercase. |
 | `UpdateBusinessInput` | `businessId`, `name?`, `description?` | Requires a UUID business ID and at least one update field. Empty `description` clears the stored value. |
 | `RemoveMemberInput` | `businessId`, `memberId` | Both IDs must be UUIDs; `memberId` identifies a `BusinessMember`, not a `User`. |
+| `CreateServiceOfferingInput` | `businessId`, `title`, `description`, `durationMinutes` | Zod schema (`createServiceOfferingSchema`) exists in `validate.ts`; no resolver consumes it yet. |
+| `UpdateServiceOfferingInput` | `serviceOfferingId`, `title?`, `description?`, `durationMinutes?`, `isActive?` | Zod schema (`updateServiceOfferingSchema`) requires a UUID id and at least one other field; no resolver consumes it yet. |
+| `CreateServiceAddOnInput` | `serviceOfferingId`, `title`, `pricePerSession`, `perSession?` | Zod schema (`createServiceAddOnSchema`) requires a positive price with ≤2 decimal places; no resolver consumes it yet. |
+| `UpdateServiceAddOnInput` | `serviceAddOnId`, `title?`, `pricePerSession?`, `perSession?`, `isActive?` | Zod schema (`updateServiceAddOnSchema`) requires a UUID id and at least one other field; no resolver consumes it yet. |
 
 ### GraphQL Object Types
 
@@ -604,6 +763,8 @@ declared business operations below are callable. `registerOwner` is registered o
 | `OwnerAuthPayload` | `token: String!, user: User!, business: Business!` | Returned by `registerOwner`       |
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
 | `BusinessMember`   | `id, role, isActive, joinedAt, user: User!` | Returned by `getBusinessMembers`, `removeMember` |
+| `ServiceOffering`  | `id, businessId, title, description, durationMinutes, isActive, addOns: [ServiceOfferingAddOn!]!` | Declared in SDL only — no resolver returns this type yet. Does not expose `packages` (the `ServicePackage[]` relation is not in the GraphQL schema at all). |
+| `ServiceOfferingAddOn` | `id, serviceOfferingId, title, pricePerSession, perSession, isActive` | Declared in SDL only — no resolver returns this type yet. `pricePerSession` is `Float!`; the underlying Prisma field is `Decimal` and will need explicit `Number()` conversion in whatever resolver is written, since Decimal instances aren't natively serializable as a GraphQL Float. |
 
 ### `AcceptInvitationInput` — Two-Path Logic
 
