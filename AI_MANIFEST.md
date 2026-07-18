@@ -53,6 +53,7 @@ pet_sitter_pro/
     │   ├── server.ts              # Entry point — Express + Apollo setup
     │   ├── types/                 # Shared TypeScript interfaces
     │   │   ├── auth.ts            # LoginInput
+    │   │   ├── booking.ts         # CreateBookingInput, BookingSessionInput, AssignSitterInput
     │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput
     │   │   ├── context.ts         # GraphQLContext interface
     │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput, InvitationEmailPayload
@@ -82,6 +83,16 @@ pet_sitter_pro/
     │           │       ├── addPet.ts
     │           │       ├── updatePet.ts
     │           │       └── deletePet.ts
+    │           ├── job/
+    │           │   ├── jobResolvers.ts   # also exports Job/Booking/BookingAddOn type-level field maps
+    │           │   └── mutations/
+    │           │       ├── createBooking.ts
+    │           │       ├── acceptJob.ts
+    │           │       ├── declineJob.ts
+    │           │       ├── assignSitter.ts
+    │           │       ├── clockIn.ts
+    │           │       ├── clockOut.ts
+    │           │       └── completeJob.ts
     │           ├── invitation/
     │           │   ├── invitationResolvers.ts
     │           │   └── mutations/
@@ -115,10 +126,13 @@ pet_sitter_pro/
     └── tsconfig.json
 ```
 
-> **Convention**: Each domain folder (`owner/`, `customer/`, `invitation/`, `user/`,
+> **Convention**: Each domain folder (`owner/`, `customer/`, `job/`, `invitation/`, `user/`,
 > `business/`, `utils/`) contains a `*Resolvers.ts` barrel file that groups its `Query` and
 > `Mutation` maps. The root `resolvers/index.ts` must explicitly import and spread each barrel;
-> adding a domain folder alone does not expose its fields through GraphQL.
+> adding a domain folder alone does not expose its fields through GraphQL. `job/jobResolvers.ts` is
+> the one exception that also exports type-level field maps (`Job`, `Booking`, `BookingAddOn`) —
+> `resolvers/index.ts` spreads those directly as top-level keys alongside `Query`/`Mutation`/`JSON`,
+> not inside either of them.
 
 ---
 
@@ -521,9 +535,10 @@ with exactly one `Job` and `servicePackageId: null`.
 
 **Indexes:** `businessId`, `customerId`
 
-> **GraphQL/resolver status:** not yet exposed anywhere in `typeDefs.ts` — no type, input, query,
-> or mutation references `Booking`. Booking creation and its downstream `Job` fan-out is not yet
-> implemented; follow §12 when building it.
+> **GraphQL/resolver status:** created by `createBooking` (`resolvers/job/mutations/createBooking.ts`).
+> Returned as the `Booking` GraphQL type; `jobs` and `addOns` are resolved lazily via type-level
+> field resolvers rather than a Prisma `include` — see `Job Resolver Behavior` in §10. There is no
+> query yet to look up a `Booking` after creation (e.g. by id, or "my bookings for this business").
 
 ---
 
@@ -541,7 +556,9 @@ purchase so a later price change on the `ServiceOfferingAddOn` doesn't rewrite o
 
 `@@unique([bookingId, addOnId])` — an add-on can only be selected once per booking.
 
-> **GraphQL/resolver status:** not yet exposed anywhere in `typeDefs.ts`.
+> **GraphQL/resolver status:** created by `createBooking`; exposed as `Booking.addOns` via a
+> type-level field resolver (not a plain `include`). `priceAtBooking` is snapshotted from the
+> add-on's price at the moment of booking, independent of later price changes.
 
 ---
 
@@ -606,6 +623,11 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 - `reportCard` → `ReportCard?` — single end-of-job summary
 
 **Indexes:** `bookingId`, `businessId`, `customerId`
+
+> **GraphQL/resolver status:** created via `createBooking`; transitioned via `acceptJob`,
+> `declineJob`, `assignSitter`, `clockIn`, `clockOut`, `completeJob` (`resolvers/job/mutations/`).
+> See `Job Resolver Behavior` in §10 for the enforced status state machine. No listing/lookup query
+> exists yet — `updates`, `review`, and `conversation` relations also have no resolvers.
 
 ---
 
@@ -774,8 +796,13 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` are expected to stay
 in lockstep, but **currently do not** for the service domain. The root resolver map explicitly
-spreads the user, business, and customer query and mutation barrels, so all declared
-user/business/customer operations below are callable. `registerOwner` is registered only as a mutation.
+spreads the user, business, customer, and job query and mutation barrels, so all declared
+user/business/customer/job operations below are callable. `registerOwner` is registered only as a
+mutation. The `job` domain currently exports no queries (only mutations) — there is no way yet to
+list/look up jobs or bookings through GraphQL; every job mutation takes an ID supplied by the
+caller. The `job` domain also registers **type-level** field resolvers (`Job`, `Booking`,
+`BookingAddOn`) spread directly onto the root resolver map alongside `Query`/`Mutation`/`JSON` —
+these back computed/gated fields (see `Job Resolver Behavior` below), not root operations.
 
 > **Known gap:** `typeDefs.ts` declares a full CRUD surface for `ServiceOffering` and
 > `ServiceOfferingAddOn` (5 queries/mutations each — see the tables below) and `validate.ts` has
@@ -819,6 +846,13 @@ user/business/customer operations below are callable. `registerOwner` is registe
 | `addPet`            | `AddPetInput`            | `Pet!`             | Yes (JWT + CustomerProfile) | `resolvers/customer/mutations/addPet.ts` — resolves the caller's `CustomerProfile` from the JWT, then creates the pet scoped to that `customerId` |
 | `updatePet`         | `UpdatePetInput`         | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/updatePet.ts` — returns 404 (NOT_FOUND) rather than FORBIDDEN if the `petId` belongs to another customer, to avoid confirming a pet ID exists cross-account |
 | `deletePet`         | `petId: ID!`             | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/deletePet.ts` — same 404-on-mismatch pattern as `updatePet`; sets `isActive` to `false` (soft delete), does not destroy the row |
+| `createBooking`     | `CreateBookingInput`     | `Booking!`         | Yes (JWT + CustomerProfile) | `resolvers/job/mutations/createBooking.ts` — creates a `Booking` + one `Job` per session in a transaction; see `Job Resolver Behavior` below |
+| `acceptJob`         | `jobId: ID!`             | `Job!`             | Yes (active OWNER/MANAGER) | `resolvers/job/mutations/acceptJob.ts` — `PENDING → ACCEPTED`; sets `acceptedAt` |
+| `declineJob`        | `jobId: ID!`             | `Job!`             | Yes (active OWNER/MANAGER) | `resolvers/job/mutations/declineJob.ts` — `PENDING → DECLINED`; sets `declinedAt` |
+| `assignSitter`      | `AssignSitterInput`      | `Job!`             | Yes (active OWNER/MANAGER) | `resolvers/job/mutations/assignSitter.ts` — `ACCEPTED → ASSIGNED`; sets `assigneeId` + `assignedAt` |
+| `clockIn`           | `jobId: ID!`             | `Job!`             | Yes (assigned sitter only) | `resolvers/job/mutations/clockIn.ts` — `ASSIGNED → IN_PROGRESS`; sets `actualStartTime` |
+| `clockOut`          | `jobId: ID!`             | `Job!`             | Yes (assigned sitter only) | `resolvers/job/mutations/clockOut.ts` — `IN_PROGRESS → COMPLETED`; sets `actualEndTime` |
+| `completeJob`       | `jobId: ID!`             | `Job!`             | Yes (active OWNER/MANAGER) | `resolvers/job/mutations/completeJob.ts` — manual override, `ASSIGNED` or `IN_PROGRESS → COMPLETED`; backfills `actualStartTime` if clock-in never happened |
 | `createServiceOffering` ⚠️ | `CreateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
 | `updateServiceOffering` ⚠️ | `UpdateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
 | `deleteServiceOffering` ⚠️ | `serviceOfferingId: ID!` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
@@ -842,6 +876,9 @@ user/business/customer operations below are callable. `registerOwner` is registe
 | `RemoveMemberInput` | `businessId`, `memberId` | Both IDs must be UUIDs; `memberId` identifies a `BusinessMember`, not a `User`. |
 | `AddPetInput` | `name`, `type`, all other `Pet` fields optional | Zod schema (`addPetSchema`) in `validate.ts`. `name` and `type` (must be a valid `PetType` enum value) are required. All other fields are optional. |
 | `UpdatePetInput` | `petId`, all other fields optional | Zod schema (`updatePetSchema`) in `validate.ts`. Partial update — only provided fields are written. An empty string on a clearable text field (`breed`, `medicalNotes`, etc.) clears it to `null`. `age`, `sex`, and `weightLb` accept explicit `null` to clear the value. |
+| `BookingSessionInput` | `scheduledStartTime`, `scheduledEndTime` | Both required datetime strings; `scheduledEndTime` must be after `scheduledStartTime` (Zod `.refine()`). One `Job` is created per entry in `CreateBookingInput.sessions`. |
+| `CreateBookingInput` | `businessId`, `serviceOfferingId`, `servicePackageId?`, `addOnIds?`, `petIds`, `sessions`, `specialInstructions?`, `accessCode?` | Zod schema (`createBookingSchema`) validates shapes/UUIDs; the resolver cross-checks against the DB that `sessions.length` matches the package's `sessionsCount` (or is exactly 1 for an ad-hoc booking with no package), that all `addOnIds` belong to the offering and are active, and that all `petIds` belong to the caller and are active. |
+| `AssignSitterInput` | `jobId`, `assigneeId` | Both UUIDs. `assigneeId` is the `BusinessMember.id`, not the `User.id` — same convention as `RemoveMemberInput.memberId`. |
 | `CreateServiceOfferingInput` | `businessId`, `title`, `description`, `durationMinutes` | Zod schema (`createServiceOfferingSchema`) exists in `validate.ts`; no resolver consumes it yet. |
 | `UpdateServiceOfferingInput` | `serviceOfferingId`, `title?`, `description?`, `durationMinutes?`, `isActive?` | Zod schema (`updateServiceOfferingSchema`) requires a UUID id and at least one other field; no resolver consumes it yet. |
 | `CreateServiceAddOnInput` | `serviceOfferingId`, `title`, `pricePerSession`, `perSession?` | Zod schema (`createServiceAddOnSchema`) requires a positive price with ≤2 decimal places; no resolver consumes it yet. |
@@ -858,6 +895,9 @@ user/business/customer operations below are callable. `registerOwner` is registe
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
 | `BusinessMember`   | `id, role, isActive, joinedAt, user: User!` | Returned by `getBusinessMembers`, `removeMember` |
 | `Pet`              | All `Pet` model fields including `isActive` | Returned by `getMyPets`, `addPet`, `updatePet`, `deletePet`. `weightLb` is `Float?`; the underlying Prisma `Decimal` must be converted with `Number()` in resolvers before returning. |
+| `Job`              | Nearly all `Job` model fields | `price` and `tipAmount` are `Float`/`Float?` resolved via type-level field resolvers (`Number()` conversion from Prisma `Decimal`). `pets` is resolved lazily (a `Pet.findMany` keyed by the job, not an `include`). `accessCode` is resolved via a gated field resolver — see `Job Resolver Behavior` below; it is **not** a plain passthrough field. `status` is a raw `String!` (not a GraphQL enum) covering all seven `JobStatus` values including `DECLINED`. |
+| `Booking`          | All `Booking` model fields, plus `jobs: [Job!]!` and `addOns: [BookingAddOn!]!` | `totalPrice` is `Float!` via a type-level resolver. `jobs` and `addOns` are both resolved lazily (separate queries keyed by `bookingId`), not via Prisma `include` — see `Job Resolver Behavior` below. Only returned today by `createBooking`; there is no query to look one up later. |
+| `BookingAddOn`     | `id, priceAtBooking, addOn: ServiceOfferingAddOn!` | `priceAtBooking` is `Float!` via a type-level resolver (snapshotted add-on price at purchase time, independent of the add-on's current price). |
 | `ServiceOffering`  | `id, businessId, title, description, durationMinutes, isActive, addOns: [ServiceOfferingAddOn!]!` | Declared in SDL only — no resolver returns this type yet. Does not expose `packages` (the `ServicePackage[]` relation is not in the GraphQL schema at all). |
 | `ServiceOfferingAddOn` | `id, serviceOfferingId, title, pricePerSession, perSession, isActive` | Declared in SDL only — no resolver returns this type yet. `pricePerSession` is `Float!`; the underlying Prisma field is `Decimal` and will need explicit `Number()` conversion in whatever resolver is written, since Decimal instances aren't natively serializable as a GraphQL Float. |
 
@@ -889,10 +929,53 @@ The following handlers are implemented and registered through `resolvers/busines
 
 The following handlers are implemented and registered through `resolvers/customer/`. All four resolvers first resolve the caller's `CustomerProfile` from the JWT `userId` and throw `UNAUTHENTICATED` if no profile exists.
 
-- `getMyPets` returns all pets where `customerId` matches the caller's profile **and** `isActive` is `true`, ordered by `createdAt` ascending.
+- `getMyPets` returns all pets where `customerId` matches the caller's profile **and** `isActive` is `true`, ordered by `name` ascending (`Pet` has no `createdAt` field).
 - `addPet` creates a new `Pet` row scoped to the caller's `customerId`. `name` and `type` are required; all other fields are optional.
 - `updatePet` applies a partial update. Empty strings on clearable text fields (`breed`, `medicalNotes`, etc.) are coerced to `null`. Explicit `null` on `age`, `sex`, or `weightLb` clears those fields. Returns `NOT_FOUND` (not `FORBIDDEN`) when the `petId` does not belong to the caller — this deliberately avoids confirming whether a pet ID exists on another account.
 - `deletePet` soft-deletes the pet by setting `isActive` to `false`. Same `NOT_FOUND`-on-mismatch security pattern as `updatePet`. The row is preserved for historical job references.
+
+### Job Resolver Behavior
+
+The following handlers are implemented and registered through `resolvers/job/`. There are no
+listing/lookup queries yet (see the known gap above) — every mutation here is given a `jobId` (or
+IDs) by the caller; nothing generates or discovers them server-side beyond `createBooking`.
+
+**`createBooking`** — the only entry point that creates `Job` rows. Resolves the caller's
+`CustomerProfile`, then validates against the DB (not just Zod): the `Business` and
+`ServiceOffering` exist and are active; if `servicePackageId` is given, it belongs to that offering,
+is active, and `sessions.length` equals its `sessionsCount`; if omitted, exactly one session is
+required and the offering's `basePrice` must be set (errors otherwise — "choose a package"); every
+`addOnId` belongs to the offering and is active; every `petId` belongs to the caller and is active.
+Pricing: `totalPrice = pricePerSession × sessionCount + Σ(addOn total) + business.serviceFeeAmount`,
+where each add-on's total is `pricePerSession × sessionCount` if `perSession` is `true`, else a flat
+`pricePerSession` once. Creates the `Booking`, its `BookingAddOn` rows (snapshotting each add-on's
+current price into `priceAtBooking`), and one `Job` per session — all in a single `$transaction`.
+Every `Job.price` is set to the plain per-session rate; add-ons and the service fee live only on
+`Booking.totalPrice`, not attributed to an individual session. `sessionNumber`/`totalSessions` are
+only set (non-null) when the booking has more than one session.
+
+**Job status is a server-enforced state machine** — every transition mutation re-reads the job's
+current `status` from the DB and rejects the call with `BAD_USER_INPUT` if it doesn't match the
+required starting state. Valid transitions:
+
+```
+PENDING ──acceptJob──► ACCEPTED ──assignSitter──► ASSIGNED ──clockIn──► IN_PROGRESS ──clockOut──► COMPLETED
+   │                                                  │
+   └──declineJob──► DECLINED                          └──completeJob──► COMPLETED  (manual override)
+```
+
+- `acceptJob` / `declineJob`: caller must be an active `OWNER`/`MANAGER` of the job's business. Set `acceptedAt`/`declinedAt` respectively.
+- `assignSitter`: caller must be an active `OWNER`/`MANAGER`. Validates `assigneeId` is an active `BusinessMember` of the **same** business as the job. Sets `assigneeId` + `assignedAt`.
+- `clockIn` / `clockOut`: caller must be the job's assigned sitter specifically — resolved by looking up the `BusinessMember` row at `job.assigneeId` and checking its `userId` matches the caller, not just any active member of the business. Set `actualStartTime`/`actualEndTime` respectively; `clockOut` also completes the job.
+- `completeJob`: caller must be an active `OWNER`/`MANAGER`. An escape hatch for when clock-in/out wasn't used — allowed from either `ASSIGNED` or `IN_PROGRESS`, and backfills `actualStartTime` with the current time if it was never set, so reporting never sees a completed job with no start time.
+
+**Sensitive and Decimal-backed fields go through type-level field resolvers**, not plain schema
+fields, defined in `job/jobResolvers.ts` and spread onto the root resolver map's `Job`/`Booking`/
+`BookingAddOn` keys (alongside `Query`/`Mutation`/`JSON` in `resolvers/index.ts`) — this applies
+regardless of which query or mutation returned the object:
+- `Job.accessCode` resolves to the real value only if the caller is an active `OWNER`/`MANAGER` of the job's business, or the `BusinessMember` matching `job.assigneeId` — otherwise `null`. It performs its own `businessMember` lookup per call, independent of whatever authorization already ran in the parent mutation.
+- `Job.price`, `Job.tipAmount`, `Booking.totalPrice`, `BookingAddOn.priceAtBooking` convert Prisma `Decimal` to `Number` before they reach the GraphQL `Float` scalar (see the `ServiceOfferingAddOn` warning above — Decimal instances are not natively serializable there).
+- `Job.pets`, `Booking.jobs`, `Booking.addOns` are resolved lazily via their own Prisma queries keyed off the parent's `id` — mutations that return a `Job`/`Booking` do not `include` these relations, so they're only fetched when a client actually asks for them.
 
 ### Scalar Types
 

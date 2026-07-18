@@ -307,6 +307,44 @@ export const updatePetSchema = z.object({
     { message: 'At least one field must be provided to update' },
 );
 
+// ── Job / Booking schemas ───────────────────────────────────────────────────
+
+const jobIdField = z.string().uuid('Invalid job ID');
+
+const bookingSessionSchema = z.object({
+    scheduledStartTime: z.coerce.date({ errorMap: () => ({ message: 'Invalid session start time' }) }),
+    scheduledEndTime: z.coerce.date({ errorMap: () => ({ message: 'Invalid session end time' }) }),
+}).refine(
+    (session) => session.scheduledEndTime > session.scheduledStartTime,
+    { message: 'Session end time must be after its start time', path: ['scheduledEndTime'] },
+);
+
+/**
+ * Validates input for creating a Booking (+ its Job session(s)).
+ * servicePackageId is optional — omit it to book a single ad-hoc session.
+ * The resolver cross-checks sessions.length against the package's sessionsCount
+ * (or requires exactly 1 session for an ad-hoc booking), since that requires a DB lookup.
+ */
+export const createBookingSchema = z.object({
+    businessId: businessIdField,
+    serviceOfferingId: serviceOfferingIdField,
+    servicePackageId: z.string().uuid('Invalid service package ID').optional(),
+    addOnIds: z.array(serviceAddOnIdField).max(20, 'Too many add-ons').default([]),
+    petIds: z.array(petIdField).min(1, 'At least one pet is required'),
+    sessions: z.array(bookingSessionSchema).min(1, 'At least one session is required').max(52, 'Too many sessions'),
+    specialInstructions: z.string().trim().max(1000, 'Special instructions too long').optional(),
+    accessCode: z.string().trim().max(50, 'Access code too long').optional(),
+});
+
+/**
+ * Validates input for assigning an active BusinessMember to an accepted job.
+ * assigneeId is the BusinessMember.id (the membership record), not the User.id.
+ */
+export const assignSitterSchema = z.object({
+    jobId: jobIdField,
+    assigneeId: z.string().uuid('Invalid employee ID'),
+});
+
 // ── Helper ─────────────────────────────────────────────────────────────────
 
 /**
