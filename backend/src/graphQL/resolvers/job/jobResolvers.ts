@@ -5,11 +5,16 @@ import { assignSitter } from './mutations/assignSitter.js';
 import { clockIn } from './mutations/clockIn.js';
 import { clockOut } from './mutations/clockOut.js';
 import { completeJob } from './mutations/completeJob.js';
+import { postJobUpdate } from './mutations/postJobUpdate.js';
+import { submitReportCard } from './mutations/submitReportCard.js';
+import { getAvailableEmployees } from './queries/getAvailableEmployees.js';
 import type { GraphQLContext } from '../../../types/context.js';
 import type { JobParent, BookingParent, BookingAddOnParent } from '../../../types/booking.js';
 
 export const jobResolvers = {
-    Query: {},
+    Query: {
+        getAvailableEmployees,
+    },
     Mutation: {
         createBooking,
         acceptJob,
@@ -18,6 +23,8 @@ export const jobResolvers = {
         clockIn,
         clockOut,
         completeJob,
+        postJobUpdate,
+        submitReportCard,
     },
     // ── Type-level field resolvers ──────────────────────────────────────────
     // Everything below is keyed by GraphQL *type name*, not Query/Mutation. Each

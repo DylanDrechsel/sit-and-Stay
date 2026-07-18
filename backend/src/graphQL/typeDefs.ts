@@ -160,6 +160,39 @@ const typeDefs = `#graphql
     createdAt: String!
   }
 
+  # A single timestamped update (photo and/or note) posted by the assigned
+  # sitter while a job is in progress — the "Updates" feed
+  type JobUpdate {
+    id: ID!
+    jobId: ID!
+    authorId: ID!
+    note: String
+    photoUrl: String
+    createdAt: String!
+  }
+
+  # The end-of-job summary the sitter fills out — one per job
+  type ReportCard {
+    id: ID!
+    jobId: ID!
+    mood: String        # VERY_HAPPY | HAPPY | CALM | ANXIOUS | LOW_ENERGY
+    peeCount: Int!
+    poopCount: Int!
+    ateFood: Boolean!
+    drankWater: Boolean!
+    gaveTreat: Boolean!
+    summary: String
+    createdAt: String!
+  }
+
+  # One business member's assignment-availability status for a specific job's
+  # scheduled time — the "Assign a sitter" screen's available/unavailable split
+  type EmployeeAvailabilityStatus {
+    member: BusinessMember!
+    isAvailable: Boolean!
+    conflictReason: String
+  }
+
   # ── Inputs ─────────────────────────────────────────────────────────
 
   input RegisterCustomerInput {
@@ -348,6 +381,27 @@ const typeDefs = `#graphql
     tags: [String!]
   }
 
+  # ── Job Activity inputs (JobUpdate / ReportCard) —————————
+
+  # At least one of note/photoUrl must be provided
+  input PostJobUpdateInput {
+    jobId: ID!
+    note: String
+    photoUrl: String
+  }
+
+  # jobId is required; every other field falls back to the model's default when omitted
+  input SubmitReportCardInput {
+    jobId: ID!
+    mood: String        # VERY_HAPPY | HAPPY | CALM | ANXIOUS | LOW_ENERGY
+    peeCount: Int
+    poopCount: Int
+    ateFood: Boolean
+    drankWater: Boolean
+    gaveTreat: Boolean
+    summary: String
+  }
+
   # ── Queries ────────────────────────────────────────────────────────
 
   type Query {
@@ -385,6 +439,10 @@ const typeDefs = `#graphql
 
     # Returns all public reviews for a business, most recent first (no auth required)
     getBusinessReviews(businessId: ID!): [Review!]!
+
+    # Returns every active member of the job's business, each annotated with whether
+    # they're free to be assigned at the job's scheduled time (OWNER/MANAGER only)
+    getAvailableEmployees(jobId: ID!): [EmployeeAvailabilityStatus!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -493,6 +551,14 @@ const typeDefs = `#graphql
     # Leaves a review for a completed job (requires JWT + job ownership + status COMPLETED).
     # Recomputes Business.avgRating/reviewCount in the same transaction as the review write.
     leaveReview(input: LeaveReviewInput!): Review!
+
+    # ── Job Activity mutations ————————————————————
+
+    # Posts a live update (photo and/or note) to an in-progress job (assigned sitter only)
+    postJobUpdate(input: PostJobUpdateInput!): JobUpdate!
+
+    # Submits a job's report card — one per job (assigned sitter only, job must be COMPLETED)
+    submitReportCard(input: SubmitReportCardInput!): ReportCard!
   }
 `;
 
