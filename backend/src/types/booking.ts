@@ -44,6 +44,8 @@ export interface AssignSitterInput {
 export interface JobParent {
     id: string;
     businessId: string;
+    customerId: string;
+    serviceOfferingId: string;
     assigneeId: string | null;
     price: unknown;
     tipAmount: unknown;
@@ -57,4 +59,31 @@ export interface BookingParent {
 
 export interface BookingAddOnParent {
     priceAtBooking: unknown;
+}
+
+// ── Job listing query inputs ────────────────────────────────────────────────
+
+/**
+ * Filters shared by the job listing queries: optional status filter plus an
+ * optional scheduledStartTime window. Dates arrive as strings from GraphQL.
+ */
+export interface JobListFilters {
+    statuses?: string[];
+    from?: string;
+    to?: string;
+}
+
+/** Input for the owner/manager job list (getBusinessJobs). */
+export interface GetBusinessJobsInput extends JobListFilters {
+    businessId: string;
+}
+
+/**
+ * Input for paging a job's update feed (getJobUpdates).
+ * `before` is a createdAt cursor for fetching the next (older) page.
+ */
+export interface GetJobUpdatesInput {
+    jobId: string;
+    limit?: number;
+    before?: string;
 }
