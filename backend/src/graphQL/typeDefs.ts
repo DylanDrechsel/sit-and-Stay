@@ -94,6 +94,59 @@ const typeDefs = `#graphql
     isActive: Boolean!
   }
 
+  # A single scheduled session — one Job per session of a Booking
+  type Job {
+    id: ID!
+    jobNumber: Int!
+    bookingId: ID
+    businessId: ID!
+    customerId: ID!
+    serviceOfferingId: ID!
+    assigneeId: ID
+    status: String!         # PENDING | ACCEPTED | ASSIGNED | IN_PROGRESS | COMPLETED | CANCELLED | DECLINED
+    respondBy: String
+    sessionNumber: Int
+    totalSessions: Int
+    scheduledStartTime: String!
+    scheduledEndTime: String!
+    actualStartTime: String
+    actualEndTime: String
+    acceptedAt: String
+    declinedAt: String
+    assignedAt: String
+    distanceMeters: Int
+    specialInstructions: String
+    # SENSITIVE — home access secret (e.g. lockbox code). Only visible to the
+    # assigned sitter and an active OWNER/MANAGER of the job's business.
+    accessCode: String
+    price: Float!
+    tipAmount: Float
+    pets: [Pet!]!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  # The customer's checkout order — groups the Job(s) created for a package purchase
+  type Booking {
+    id: ID!
+    businessId: ID!
+    customerId: ID!
+    serviceOfferingId: ID!
+    servicePackageId: ID
+    totalPrice: Float!
+    jobs: [Job!]!
+    addOns: [BookingAddOn!]!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  # An add-on selected at checkout, with its price snapshotted at booking time
+  type BookingAddOn {
+    id: ID!
+    priceAtBooking: Float!
+    addOn: ServiceOfferingAddOn!
+  }
+
   # ── Inputs ─────────────────────────────────────────────────────────
 
   input RegisterCustomerInput {
@@ -246,6 +299,33 @@ const typeDefs = `#graphql
     vetPhone: String
   }
 
+  # ── Job / Booking inputs ————————————————————————
+
+  input BookingSessionInput {
+    scheduledStartTime: String!
+    scheduledEndTime: String!
+  }
+
+  # Provide servicePackageId to book a multi-session package (sessions.length
+  # must match the package's sessionsCount); omit it to book a single ad-hoc
+  # session priced from the service offering's basePrice.
+  input CreateBookingInput {
+    businessId: ID!
+    serviceOfferingId: ID!
+    servicePackageId: ID
+    addOnIds: [ID!]
+    petIds: [ID!]!
+    sessions: [BookingSessionInput!]!
+    specialInstructions: String
+    accessCode: String
+  }
+
+  # assigneeId is the BusinessMember.id (the membership record), not the User.id
+  input AssignSitterInput {
+    jobId: ID!
+    assigneeId: ID!
+  }
+
   # ── Queries ────────────────────────────────────────────────────────
 
   type Query {
@@ -358,6 +438,30 @@ const typeDefs = `#graphql
 
     # Soft-deletes one of the authenticated customer's own pets by setting isActive to false
     deletePet(petId: ID!): Pet!
+
+    # ── Job / Booking mutations ————————————————————
+
+    # Creates a Booking + its Job session(s) for the authenticated customer (requires JWT + CustomerProfile)
+    createBooking(input: CreateBookingInput!): Booking!
+
+    # Accepts a pending job request (OWNER/MANAGER only). PENDING -> ACCEPTED.
+    acceptJob(jobId: ID!): Job!
+
+    # Declines a pending job request (OWNER/MANAGER only). PENDING -> DECLINED.
+    declineJob(jobId: ID!): Job!
+
+    # Assigns an active BusinessMember to an accepted job (OWNER/MANAGER only). ACCEPTED -> ASSIGNED.
+    assignSitter(input: AssignSitterInput!): Job!
+
+    # Clocks the assigned sitter in to a job (assigned sitter only). ASSIGNED -> IN_PROGRESS.
+    clockIn(jobId: ID!): Job!
+
+    # Clocks the assigned sitter out, finishing the job (assigned sitter only). IN_PROGRESS -> COMPLETED.
+    clockOut(jobId: ID!): Job!
+
+    # Manually marks a job completed (OWNER/MANAGER only) — an override for when
+    # clock-in/clock-out wasn't used. Allowed from ASSIGNED or IN_PROGRESS -> COMPLETED.
+    completeJob(jobId: ID!): Job!
   }
 `;
 
