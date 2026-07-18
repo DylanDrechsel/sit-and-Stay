@@ -55,7 +55,14 @@ export const changeEmail = async (
         });
     }
 
-    // 4. Confirm identity with current password
+    // 4. Confirm identity with current password. passwordHash is null for OAuth-only
+    //    accounts (Google/Apple), which have no password to confirm with.
+    if (user.passwordHash == null) {
+        throw new GraphQLError('This account signs in via Google or Apple and has no password to confirm.', {
+            extensions: { code: 'BAD_USER_INPUT' },
+        });
+    }
+
     const valid = await comparePassword(password, user.passwordHash);
     if (!valid) {
         throw new GraphQLError('Password is incorrect.', {

@@ -246,10 +246,10 @@ export const updateServiceAddOnSchema = z.object({
 const petIdField = z.string().uuid('Invalid pet ID');
 
 const petTypeField = z.enum(['DOG', 'CAT', 'BIRD', 'RABBIT', 'REPTILE', 'OTHER'], {
-    errorMap: () => ({ message: 'Type must be one of DOG, CAT, BIRD, RABBIT, REPTILE, OTHER' }),
+    message: 'Type must be one of DOG, CAT, BIRD, RABBIT, REPTILE, OTHER',
 });
 const petSexField = z.enum(['MALE', 'FEMALE'], {
-    errorMap: () => ({ message: 'Sex must be MALE or FEMALE' }),
+    message: 'Sex must be MALE or FEMALE',
 });
 // Accepts a full absolute URL (e.g., https://...) or a local relative path (e.g., /uploads/...)
 const photoUrlField = z.string().trim().refine(
@@ -312,8 +312,8 @@ export const updatePetSchema = z.object({
 const jobIdField = z.string().uuid('Invalid job ID');
 
 const bookingSessionSchema = z.object({
-    scheduledStartTime: z.coerce.date({ errorMap: () => ({ message: 'Invalid session start time' }) }),
-    scheduledEndTime: z.coerce.date({ errorMap: () => ({ message: 'Invalid session end time' }) }),
+    scheduledStartTime: z.coerce.date({ message: 'Invalid session start time' }),
+    scheduledEndTime: z.coerce.date({ message: 'Invalid session end time' }),
 }).refine(
     (session) => session.scheduledEndTime > session.scheduledStartTime,
     { message: 'Session end time must be after its start time', path: ['scheduledEndTime'] },
@@ -343,6 +343,22 @@ export const createBookingSchema = z.object({
 export const assignSitterSchema = z.object({
     jobId: jobIdField,
     assigneeId: z.string().uuid('Invalid employee ID'),
+});
+
+// ── Review schemas ──────────────────────────────────────────────────────────
+
+/**
+ * Validates input for leaving a review on a completed job.
+ * The resolver enforces that the job belongs to the caller, is COMPLETED,
+ * and has no existing review (jobId is unique on Review) — all DB-dependent
+ * checks that can't be expressed in Zod.
+ */
+export const leaveReviewSchema = z.object({
+    jobId: jobIdField,
+    rating: z.number().int('Rating must be a whole number')
+        .min(1, 'Rating must be between 1 and 5').max(5, 'Rating must be between 1 and 5'),
+    comment: z.string().trim().max(2000, 'Comment too long').optional(),
+    tags: z.array(z.string().trim().min(1).max(50)).max(10, 'Too many tags').default([]),
 });
 
 // ── Helper ─────────────────────────────────────────────────────────────────

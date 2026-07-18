@@ -51,7 +51,15 @@ export const changePassword = async (
         });
     }
 
-    // 4. Verify the current password — use a generic error to prevent information leakage
+    // 4. Verify the current password — use a generic error to prevent information leakage.
+    //    passwordHash is null for OAuth-only accounts (Google/Apple), which have no
+    //    password to change.
+    if (user.passwordHash == null) {
+        throw new GraphQLError('This account signs in via Google or Apple and has no password to change.', {
+            extensions: { code: 'BAD_USER_INPUT' },
+        });
+    }
+
     const valid = await comparePassword(currentPassword, user.passwordHash);
     if (!valid) {
         throw new GraphQLError('Current password is incorrect.', {

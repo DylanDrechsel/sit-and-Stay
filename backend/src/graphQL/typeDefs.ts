@@ -147,6 +147,19 @@ const typeDefs = `#graphql
     addOn: ServiceOfferingAddOn!
   }
 
+  # A review left by a customer for a completed job
+  type Review {
+    id: ID!
+    jobId: ID!
+    businessId: ID!
+    customerId: ID!
+    rating: Int!
+    comment: String
+    tags: [String!]!
+    isPublic: Boolean!
+    createdAt: String!
+  }
+
   # ── Inputs ─────────────────────────────────────────────────────────
 
   input RegisterCustomerInput {
@@ -326,6 +339,15 @@ const typeDefs = `#graphql
     assigneeId: ID!
   }
 
+  # ── Review inputs ————————————————————————————————
+
+  input LeaveReviewInput {
+    jobId: ID!
+    rating: Int!
+    comment: String
+    tags: [String!]
+  }
+
   # ── Queries ────────────────────────────────────────────────────────
 
   type Query {
@@ -360,6 +382,9 @@ const typeDefs = `#graphql
 
     # Returns the authenticated customer's active pets, ordered by name (requires JWT + CustomerProfile)
     getMyPets: [Pet!]!
+
+    # Returns all public reviews for a business, most recent first (no auth required)
+    getBusinessReviews(businessId: ID!): [Review!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -462,6 +487,12 @@ const typeDefs = `#graphql
     # Manually marks a job completed (OWNER/MANAGER only) — an override for when
     # clock-in/clock-out wasn't used. Allowed from ASSIGNED or IN_PROGRESS -> COMPLETED.
     completeJob(jobId: ID!): Job!
+
+    # ── Review mutations ————————————————————————
+
+    # Leaves a review for a completed job (requires JWT + job ownership + status COMPLETED).
+    # Recomputes Business.avgRating/reviewCount in the same transaction as the review write.
+    leaveReview(input: LeaveReviewInput!): Review!
   }
 `;
 
