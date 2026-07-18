@@ -345,6 +345,41 @@ export const assignSitterSchema = z.object({
     assigneeId: z.string().uuid('Invalid employee ID'),
 });
 
+// ── Job Activity schemas (JobUpdate / ReportCard) ───────────────────────────
+
+/**
+ * Validates input for posting a live update (photo and/or note) to an
+ * in-progress job. At least one of note/photoUrl must be provided.
+ */
+export const postJobUpdateSchema = z.object({
+    jobId: jobIdField,
+    note: z.string().trim().min(1, 'Note cannot be empty').max(1000, 'Note too long').optional(),
+    photoUrl: photoUrlField.optional(),
+}).refine(
+    (data) => data.note !== undefined || data.photoUrl !== undefined,
+    { message: 'Provide a note, a photo, or both' },
+);
+
+const petMoodField = z.enum(['VERY_HAPPY', 'HAPPY', 'CALM', 'ANXIOUS', 'LOW_ENERGY'], {
+    message: 'Mood must be one of VERY_HAPPY, HAPPY, CALM, ANXIOUS, LOW_ENERGY',
+});
+
+/**
+ * Validates input for submitting a job's report card. jobId is required;
+ * every other field is optional and falls back to the model's default
+ * (peeCount/poopCount default 0, the boolean flags default false) when omitted.
+ */
+export const submitReportCardSchema = z.object({
+    jobId: jobIdField,
+    mood: petMoodField.optional(),
+    peeCount: z.number().int('Pee count must be a whole number').nonnegative('Pee count cannot be negative').optional(),
+    poopCount: z.number().int('Poop count must be a whole number').nonnegative('Poop count cannot be negative').optional(),
+    ateFood: z.boolean().optional(),
+    drankWater: z.boolean().optional(),
+    gaveTreat: z.boolean().optional(),
+    summary: z.string().trim().max(2000, 'Summary too long').optional(),
+});
+
 // ── Review schemas ──────────────────────────────────────────────────────────
 
 /**
