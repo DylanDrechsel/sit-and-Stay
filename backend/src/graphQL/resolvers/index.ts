@@ -7,6 +7,7 @@ import { userResolvers } from './user/userResolvers.js';
 import { businessResolvers } from './business/businessResolvers.js';
 import { jobResolvers } from './job/jobResolvers.js';
 import { reviewResolvers } from './review/reviewResolvers.js';
+import { serviceResolvers } from './service/serviceResolvers.js';
 
 export default {
     Query: {
@@ -16,6 +17,7 @@ export default {
         ...customerResolvers.Query,
         ...jobResolvers.Query,
         ...reviewResolvers.Query,
+        ...serviceResolvers.Query,
     },
     Mutation: {
         ...invitationResolvers.Mutation,
@@ -26,10 +28,15 @@ export default {
         ...businessResolvers.Mutation,
         ...jobResolvers.Mutation,
         ...reviewResolvers.Mutation,
+        ...serviceResolvers.Mutation,
     },
     Job: jobResolvers.Job,
     Booking: jobResolvers.Booking,
     BookingAddOn: jobResolvers.BookingAddOn,
     Business: businessResolvers.Business,
+    CustomerProfile: customerResolvers.CustomerProfile,
+    ServiceOffering: serviceResolvers.ServiceOffering,
+    ServiceOfferingAddOn: serviceResolvers.ServiceOfferingAddOn,
+    ServicePackage: serviceResolvers.ServicePackage,
     JSON: GraphQLJSON,
 };

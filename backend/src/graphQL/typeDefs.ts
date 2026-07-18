@@ -73,10 +73,14 @@ const typeDefs = `#graphql
     id: ID!
     businessId: ID!
     title: String!
+    category: String        # WALKING | BOARDING | DROP_IN | DAY_CARE | TRAINING | GROOMING | HOUSE_SITTING
     description: String!
+    basePrice: Float         # headline "from $X" price; null if only bookable via a package
     durationMinutes: Int!
+    features: [String!]!     # badge chips, e.g. "GPS tracked", "Insured"
     isActive: Boolean!
     addOns: [ServiceOfferingAddOn!]!
+    packages: [ServicePackage!]!
   }
 
   # An optional extra charge attached to a ServiceOffering (e.g., "Additional Dog")
@@ -87,6 +91,25 @@ const typeDefs = `#graphql
     pricePerSession: Float!
     perSession: Boolean!
     isActive: Boolean!
+  }
+
+  # A priced tier for a ServiceOffering (e.g., "Single Session" vs "4 Session Package")
+  type ServicePackage {
+    id: ID!
+    serviceOfferingId: ID!
+    title: String!
+    sessionsCount: Int!
+    pricePerSession: Float!
+    isActive: Boolean!
+  }
+
+  # A customer's booking profile — reachable nested via Job.customer so
+  # business-side screens can show who booked ("Alex R. · Ballard")
+  type CustomerProfile {
+    id: ID!
+    address: String
+    city: String
+    user: User!
   }
 
   # A pet belonging to the authenticated customer
@@ -138,6 +161,10 @@ const typeDefs = `#graphql
     price: Float!
     tipAmount: Float
     pets: [Pet!]!
+    # Display relations for list/detail screens — resolved lazily
+    customer: CustomerProfile!
+    service: ServiceOffering!
+    assignee: BusinessMember
     createdAt: String!
     updatedAt: String!
   }
@@ -291,20 +318,29 @@ const typeDefs = `#graphql
 
   # ── Service inputs ————————————————————————————————
 
+  # category/basePrice/features are optional — basePrice enables single ad-hoc
+  # bookings (createBooking) without a package
   input CreateServiceOfferingInput {
     businessId: ID!
     title: String!
     description: String!
     durationMinutes: Int!
+    category: String
+    basePrice: Float
+    features: [String!]
   }
 
   # serviceOfferingId is required; all other fields are optional (partial update).
-  # At least one of title, description, durationMinutes, or isActive must be provided.
+  # category/basePrice accept explicit null to clear; features, when provided, replaces
+  # the whole array. At least one field besides serviceOfferingId must be provided.
   input UpdateServiceOfferingInput {
     serviceOfferingId: ID!
     title: String
     description: String
     durationMinutes: Int
+    category: String
+    basePrice: Float
+    features: [String!]
     isActive: Boolean
   }
 
@@ -322,6 +358,24 @@ const typeDefs = `#graphql
     title: String
     pricePerSession: Float
     perSession: Boolean
+    isActive: Boolean
+  }
+
+  # sessionsCount defaults to 1 when omitted
+  input CreateServicePackageInput {
+    serviceOfferingId: ID!
+    title: String!
+    sessionsCount: Int
+    pricePerSession: Float!
+  }
+
+  # servicePackageId is required; all other fields are optional (partial update).
+  # At least one field besides servicePackageId must be provided.
+  input UpdateServicePackageInput {
+    servicePackageId: ID!
+    title: String
+    sessionsCount: Int
+    pricePerSession: Float
     isActive: Boolean
   }
 
@@ -457,17 +511,22 @@ const typeDefs = `#graphql
       limit: Int
     ): [NearbyBusiness!]!
 
-    # Returns a single service offering with its add-ons (requires JWT + active business membership)
+    # Returns a single service offering. Active members of its business see it regardless of
+    # state; everyone else only if it and its business are active (no auth required otherwise).
     getServiceOffering(serviceOfferingId: ID!): ServiceOffering!
 
-    # Returns all service offerings (active and inactive) for a business (requires JWT + active business membership)
+    # Returns a business's service offerings — all of them for an active member, active-only
+    # for everyone else (no auth required otherwise; the public storefront view).
     getServiceOfferings(businessId: ID!): [ServiceOffering!]!
 
-    # Returns a single service add-on (requires JWT + active business membership)
+    # Same active-member-vs-public visibility rule as getServiceOffering, for a single add-on
     getServiceAddOn(serviceAddOnId: ID!): ServiceOfferingAddOn!
 
-    # Returns all add-ons (active and inactive) for a service offering (requires JWT + active business membership)
+    # Same active-member-vs-public visibility rule as getServiceOfferings, for an offering's add-ons
     getServiceAddOns(serviceOfferingId: ID!): [ServiceOfferingAddOn!]!
+
+    # Same active-member-vs-public visibility rule as getServiceAddOns, for an offering's pricing tiers
+    getServicePackages(serviceOfferingId: ID!): [ServicePackage!]!
 
     # Returns the authenticated customer's active pets, ordered by name (requires JWT + CustomerProfile)
     getMyPets: [Pet!]!
@@ -478,6 +537,26 @@ const typeDefs = `#graphql
     # Returns every active member of the job's business, each annotated with whether
     # they're free to be assigned at the job's scheduled time (OWNER/MANAGER only)
     getAvailableEmployees(jobId: ID!): [EmployeeAvailabilityStatus!]!
+
+    # ── Job / Booking listing queries ————————————————
+
+    # Returns the authenticated customer's bookings, newest first (requires JWT + CustomerProfile)
+    getMyBookings: [Booking!]!
+
+    # Returns a business's jobs for the dashboard/requests/schedule views (OWNER/MANAGER only).
+    # statuses filters to those JobStatus values; from/to bound scheduledStartTime.
+    getBusinessJobs(businessId: ID!, statuses: [String!], from: String, to: String): [Job!]!
+
+    # Returns every job assigned to the caller in their sitter role, across all their
+    # active memberships (requires JWT). Same statuses/from/to filters as getBusinessJobs.
+    getMyJobs(statuses: [String!], from: String, to: String): [Job!]!
+
+    # Returns a single job (job's customer, assigned sitter, or OWNER/MANAGER only)
+    getJob(jobId: ID!): Job!
+
+    # Returns a job's live update feed, newest first (same access as getJob).
+    # Cursor pagination: pass the oldest createdAt you have as 'before' for the next page.
+    getJobUpdates(jobId: ID!, limit: Int, before: String): [JobUpdate!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -549,6 +628,15 @@ const typeDefs = `#graphql
 
     # Soft-deletes a service add-on by setting isActive to false (OWNER or MANAGER only)
     deleteServiceAddOn(serviceAddOnId: ID!): ServiceOfferingAddOn!
+
+    # Creates a pricing tier under a service offering (OWNER or MANAGER only)
+    createServicePackage(input: CreateServicePackageInput!): ServicePackage!
+
+    # Partial update of a service package (OWNER or MANAGER only)
+    updateServicePackage(input: UpdateServicePackageInput!): ServicePackage!
+
+    # Soft-deletes a service package by setting isActive to false (OWNER or MANAGER only)
+    deleteServicePackage(servicePackageId: ID!): ServicePackage!
 
     # ── Pet mutations ————————————————————————————
 

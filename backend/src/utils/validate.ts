@@ -224,30 +224,44 @@ const serviceAddOnIdField = z.string().uuid('Invalid service add-on ID');
 const priceField = z.number().positive('Price must be greater than 0')
     .refine((value) => Number.isInteger(value * 100), 'Price must have at most 2 decimal places');
 
+// Badge chips shown on the service card, e.g. "GPS tracked", "Insured"
+const featuresField = z.array(z.string().trim().min(1, 'Feature cannot be empty').max(50, 'Feature too long'))
+    .max(10, 'Too many features');
+
 /**
  * Validates input for creating a new ServiceOffering under a business.
+ * category/basePrice/features are optional — basePrice is the headline
+ * "from $X" price and enables single ad-hoc bookings; category makes the
+ * offering findable via getNearbyBusinesses' category filter.
  */
 export const createServiceOfferingSchema = z.object({
     businessId: businessIdField,
     title: z.string().trim().min(1, 'Title is required').max(100, 'Title too long'),
     description: z.string().trim().min(1, 'Description is required').max(1000, 'Description too long'),
     durationMinutes: z.number().int('Duration must be a whole number').positive('Duration must be greater than 0'),
+    category: serviceCategoryField.optional(),
+    basePrice: priceField.optional(),
+    features: featuresField.optional(),
 });
 
 /**
  * Validates input for updating a ServiceOffering.
  * serviceOfferingId is required; all other fields are optional.
- * At least one of title, description, durationMinutes, or isActive must be provided.
+ * category and basePrice accept explicit null to clear the stored value;
+ * features, when provided, replaces the whole array.
+ * At least one field besides serviceOfferingId must be provided.
  */
 export const updateServiceOfferingSchema = z.object({
     serviceOfferingId: serviceOfferingIdField,
     title: z.string().trim().min(1, 'Title cannot be empty').max(100, 'Title too long').optional(),
     description: z.string().trim().min(1, 'Description cannot be empty').max(1000, 'Description too long').optional(),
     durationMinutes: z.number().int('Duration must be a whole number').positive('Duration must be greater than 0').optional(),
+    category: z.union([serviceCategoryField, z.null()]).optional(),
+    basePrice: z.union([priceField, z.null()]).optional(),
+    features: featuresField.optional(),
     isActive: z.boolean().optional(),
 }).refine(
-    (data) => data.title !== undefined || data.description !== undefined
-        || data.durationMinutes !== undefined || data.isActive !== undefined,
+    (data) => Object.keys(data).some((key) => key !== 'serviceOfferingId' && (data as Record<string, unknown>)[key] !== undefined),
     { message: 'At least one field must be provided to update' },
 );
 
@@ -275,6 +289,39 @@ export const updateServiceAddOnSchema = z.object({
 }).refine(
     (data) => data.title !== undefined || data.pricePerSession !== undefined
         || data.perSession !== undefined || data.isActive !== undefined,
+    { message: 'At least one field must be provided to update' },
+);
+
+// Reusable field — package operations require a valid ServicePackage.id
+const servicePackageIdField = z.string().uuid('Invalid service package ID');
+
+/**
+ * Validates input for creating a new ServicePackage (pricing tier) under a
+ * ServiceOffering. sessionsCount caps at 52 to match createBookingSchema's
+ * sessions ceiling — a package no booking could ever fulfill is a mistake.
+ */
+export const createServicePackageSchema = z.object({
+    serviceOfferingId: serviceOfferingIdField,
+    title: z.string().trim().min(1, 'Title is required').max(100, 'Title too long'),
+    sessionsCount: z.number().int('Sessions count must be a whole number')
+        .positive('Sessions count must be greater than 0').max(52, 'Sessions count cannot exceed 52').default(1),
+    pricePerSession: priceField,
+});
+
+/**
+ * Validates input for updating a ServicePackage.
+ * servicePackageId is required; all other fields are optional.
+ * At least one field besides servicePackageId must be provided.
+ */
+export const updateServicePackageSchema = z.object({
+    servicePackageId: servicePackageIdField,
+    title: z.string().trim().min(1, 'Title cannot be empty').max(100, 'Title too long').optional(),
+    sessionsCount: z.number().int('Sessions count must be a whole number')
+        .positive('Sessions count must be greater than 0').max(52, 'Sessions count cannot exceed 52').optional(),
+    pricePerSession: priceField.optional(),
+    isActive: z.boolean().optional(),
+}).refine(
+    (data) => Object.keys(data).some((key) => key !== 'servicePackageId' && (data as Record<string, unknown>)[key] !== undefined),
     { message: 'At least one field must be provided to update' },
 );
 
@@ -381,6 +428,47 @@ export const createBookingSchema = z.object({
 export const assignSitterSchema = z.object({
     jobId: jobIdField,
     assigneeId: z.string().uuid('Invalid employee ID'),
+});
+
+// ── Job listing schemas ─────────────────────────────────────────────────────
+
+const jobStatusField = z.enum(
+    ['PENDING', 'ACCEPTED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'DECLINED'],
+    { message: 'Invalid job status' },
+);
+
+// Shared filter shape for the job listing queries: optional status filter plus
+// an optional scheduledStartTime window.
+const jobListFilters = {
+    statuses: z.array(jobStatusField).min(1, 'statuses cannot be empty when provided').optional(),
+    from: z.coerce.date({ message: 'Invalid from date' }).optional(),
+    to: z.coerce.date({ message: 'Invalid to date' }).optional(),
+};
+
+/**
+ * Validates input for the owner/manager job list (getBusinessJobs).
+ */
+export const getBusinessJobsSchema = z.object({
+    businessId: businessIdField,
+    ...jobListFilters,
+});
+
+/**
+ * Validates input for the sitter's own job list (getMyJobs).
+ */
+export const getMyJobsSchema = z.object({
+    ...jobListFilters,
+});
+
+/**
+ * Validates input for paging a job's update feed (getJobUpdates).
+ * `before` is a createdAt cursor — pass the oldest createdAt you already have
+ * to fetch the next (older) page.
+ */
+export const getJobUpdatesSchema = z.object({
+    jobId: jobIdField,
+    limit: z.number().int('Limit must be a whole number').positive('Limit must be greater than 0').max(100, 'Limit cannot exceed 100').default(50),
+    before: z.coerce.date({ message: 'Invalid before cursor' }).optional(),
 });
 
 // ── Job Activity schemas (JobUpdate / ReportCard) ───────────────────────────

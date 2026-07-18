@@ -8,12 +8,22 @@ import { completeJob } from './mutations/completeJob.js';
 import { postJobUpdate } from './mutations/postJobUpdate.js';
 import { submitReportCard } from './mutations/submitReportCard.js';
 import { getAvailableEmployees } from './queries/getAvailableEmployees.js';
+import { getMyBookings } from './queries/getMyBookings.js';
+import { getBusinessJobs } from './queries/getBusinessJobs.js';
+import { getMyJobs } from './queries/getMyJobs.js';
+import { getJob } from './queries/getJob.js';
+import { getJobUpdates } from './queries/getJobUpdates.js';
 import type { GraphQLContext } from '../../../types/context.js';
 import type { JobParent, BookingParent, BookingAddOnParent } from '../../../types/booking.js';
 
 export const jobResolvers = {
     Query: {
         getAvailableEmployees,
+        getMyBookings,
+        getBusinessJobs,
+        getMyJobs,
+        getJob,
+        getJobUpdates,
     },
     Mutation: {
         createBooking,
@@ -48,6 +58,22 @@ export const jobResolvers = {
         // lazily instead, only when a client actually asks for this field.
         pets: (parent: JobParent, _: unknown, context: GraphQLContext) =>
             context.prisma.pet.findMany({ where: { jobs: { some: { id: parent.id } } } }),
+
+        // Same lazy-fetch pattern for the display relations the list screens
+        // need (customer name, service title, sitter card). Nested User comes
+        // via the CustomerProfile.user / BusinessMember-include patterns of
+        // their own domains.
+        customer: (parent: JobParent, _: unknown, context: GraphQLContext) =>
+            context.prisma.customerProfile.findUniqueOrThrow({ where: { id: parent.customerId } }),
+        service: (parent: JobParent, _: unknown, context: GraphQLContext) =>
+            context.prisma.serviceOffering.findUniqueOrThrow({ where: { id: parent.serviceOfferingId } }),
+        assignee: (parent: JobParent, _: unknown, context: GraphQLContext) =>
+            parent.assigneeId == null
+                ? null
+                : context.prisma.businessMember.findUnique({
+                    where: { id: parent.assigneeId },
+                    include: { user: true },
+                }),
 
         // Deliberately NOT a passthrough field, even though parent.accessCode
         // already holds the real value. Re-checks on every read whether the

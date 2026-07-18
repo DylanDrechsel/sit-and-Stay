@@ -53,14 +53,16 @@ pet_sitter_pro/
     │   ├── server.ts              # Entry point — Express + Apollo setup
     │   ├── types/                 # Shared TypeScript interfaces
     │   │   ├── auth.ts            # LoginInput
-    │   │   ├── booking.ts         # CreateBookingInput, BookingSessionInput, AssignSitterInput
+    │   │   ├── booking.ts         # Booking/Job lifecycle inputs, job listing query inputs, Job/Booking parent shapes
     │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput, GetNearbyBusinessesInput, SetBusinessLocationInput, BusinessParent
     │   │   ├── context.ts         # GraphQLContext interface
+    │   │   ├── customer.ts        # CustomerProfileParent
     │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput, InvitationEmailPayload
     │   │   ├── jobActivity.ts     # PostJobUpdateInput, SubmitReportCardInput
     │   │   ├── pet.ts             # AddPetInput, UpdatePetInput
     │   │   ├── registration.ts    # RegisterCustomerInput, RegisterOwnerInput
     │   │   ├── review.ts          # LeaveReviewInput
+    │   │   ├── service.ts         # service CRUD inputs + ServiceOffering/AddOn/Package parent shapes
     │   │   └── user.ts            # UpdateUserInput, ChangePasswordInput, ChangeEmailInput
     │   ├── utils/
     │   │   ├── generatePrisma.ts  # Prisma singleton using pg.Pool + PrismaPg adapter
@@ -87,8 +89,14 @@ pet_sitter_pro/
     │           │       └── deletePet.ts
     │           ├── job/
     │           │   ├── jobResolvers.ts   # also exports Job/Booking/BookingAddOn type-level field maps
+    │           │   ├── jobAccess.ts      # assertJobViewAccess — shared view-permission check for job reads
     │           │   ├── queries/
-    │           │   │   └── getAvailableEmployees.ts
+    │           │   │   ├── getAvailableEmployees.ts
+    │           │   │   ├── getMyBookings.ts
+    │           │   │   ├── getBusinessJobs.ts
+    │           │   │   ├── getMyJobs.ts
+    │           │   │   ├── getJob.ts
+    │           │   │   └── getJobUpdates.ts
     │           │   └── mutations/
     │           │       ├── createBooking.ts
     │           │       ├── acceptJob.ts
@@ -132,6 +140,25 @@ pet_sitter_pro/
     │           │   │   └── getBusinessReviews.ts
     │           │   └── mutations/
     │           │       └── leaveReview.ts
+    │           ├── service/
+    │           │   ├── serviceResolvers.ts
+    │           │   ├── serviceAccess.ts   # requireBusinessManager (writes), isActiveMember (member-vs-public reads)
+    │           │   ├── queries/
+    │           │   │   ├── getServiceOffering.ts
+    │           │   │   ├── getServiceOfferings.ts
+    │           │   │   ├── getServiceAddOn.ts
+    │           │   │   ├── getServiceAddOns.ts
+    │           │   │   └── getServicePackages.ts
+    │           │   └── mutations/
+    │           │       ├── createServiceOffering.ts
+    │           │       ├── updateServiceOffering.ts
+    │           │       ├── deleteServiceOffering.ts
+    │           │       ├── createServiceAddOn.ts
+    │           │       ├── updateServiceAddOn.ts
+    │           │       ├── deleteServiceAddOn.ts
+    │           │       ├── createServicePackage.ts
+    │           │       ├── updateServicePackage.ts
+    │           │       └── deleteServicePackage.ts
     │           └── utils/
     │               ├── utilsResolvers.ts
     │               └── mutations/
@@ -142,12 +169,13 @@ pet_sitter_pro/
 ```
 
 > **Convention**: Each domain folder (`owner/`, `customer/`, `job/`, `invitation/`, `user/`,
-> `business/`, `review/`, `utils/`) contains a `*Resolvers.ts` barrel file that groups its `Query`
-> and `Mutation` maps. The root `resolvers/index.ts` must explicitly import and spread each barrel;
-> adding a domain folder alone does not expose its fields through GraphQL. `job/jobResolvers.ts` is
-> the one exception that also exports type-level field maps (`Job`, `Booking`, `BookingAddOn`) —
-> `resolvers/index.ts` spreads those directly as top-level keys alongside `Query`/`Mutation`/`JSON`,
-> not inside either of them.
+> `business/`, `review/`, `service/`, `utils/`) contains a `*Resolvers.ts` barrel file that groups
+> its `Query` and `Mutation` maps. The root `resolvers/index.ts` must explicitly import and spread
+> each barrel; adding a domain folder alone does not expose its fields through GraphQL. Several
+> barrels also export **type-level field maps** (`job` → `Job`/`Booking`/`BookingAddOn`, `business`
+> → `Business`, `customer` → `CustomerProfile`, `service` → `ServiceOffering`/
+> `ServiceOfferingAddOn`) — `resolvers/index.ts` attaches those directly as top-level keys alongside
+> `Query`/`Mutation`/`JSON`, not inside either of them.
 
 ---
 
@@ -485,7 +513,7 @@ A pet belonging to a customer.
 
 ---
 
-### Model: `ServiceOffering` → table `service_offerings`
+### Model: `ServiceOffering` → table `"ServiceOffering"`
 
 A service that a business advertises (e.g., Dog Walking — 30 min). Carries an optional headline
 `basePrice` ("from $X"), while detailed pricing is still expressed through its `packages` and
@@ -505,18 +533,17 @@ A service that a business advertises (e.g., Dog Walking — 30 min). Carries an 
 | `packages`       | ServicePackage[] | pricing tiers for this offering (see below) |
 | `addOns`         | ServiceOfferingAddOn[] | optional extra charges for this offering (see below) |
 
-> **GraphQL/resolver status:** `typeDefs.ts` declares a full CRUD surface for `ServiceOffering`
-> (`ServiceOffering` type, `Create`/`UpdateServiceOfferingInput`, `getServiceOffering(s)`,
-> `create`/`update`/`deleteServiceOffering`) and `src/utils/validate.ts` has matching Zod schemas
-> (`createServiceOfferingSchema`, `updateServiceOfferingSchema`), but **no resolver files exist**
-> for any of it — there is no `resolvers/service/` domain and `resolvers/index.ts` does not
-> reference one. These SDL fields have no backing resolver map entries; calling them will fail
-> at query time (or break schema construction, depending on Apollo's strictness setting). Treat
-> this as declared-but-unimplemented until resolvers are added following §12.
+> **GraphQL/resolver status:** full CRUD implemented in `resolvers/service/`
+> (`getServiceOffering(s)`, `create`/`update`/`deleteServiceOffering`). Writes are OWNER/MANAGER
+> only (`requireBusinessManager` in `service/serviceAccess.ts`); reads use a member-vs-public
+> visibility split (`isActiveMember` in the same file) — see `Service Resolver Behavior` in §10 for
+> both. `basePrice` goes through a type-level `Number()` conversion; `addOns`/`packages` resolve
+> lazily and apply the same visibility split as their dedicated queries, so a nested
+> `serviceOffering { addOns { ... } }` selection can't leak inactive rows to the public.
 
 ---
 
-### Model: `ServicePackage` → table `service_packages`
+### Model: `ServicePackage` → table `"ServicePackage"`
 
 A priced tier for a `ServiceOffering` (e.g., "Single Session" vs "4 Session Package").
 
@@ -529,13 +556,16 @@ A priced tier for a `ServiceOffering` (e.g., "Single Session" vs "4 Session Pack
 | `pricePerSession`   | Decimal | USD, precision `(10,2)`                          |
 | `isActive`          | Boolean | default `true`                                   |
 
-> **GraphQL/resolver status:** not exposed anywhere in `typeDefs.ts` — no type, input, query, or
-> mutation references `ServicePackage`. Only reachable today via the seed data created inside
-> `registerOwner.ts`'s transaction. No CRUD surface exists for this model.
+> **GraphQL/resolver status:** full CRUD implemented in `resolvers/service/` — this model went
+> from zero GraphQL surface straight to complete CRUD in one pass (previously "only reachable via
+> `registerOwner.ts`'s seed data"). `getServicePackages(serviceOfferingId)` and
+> `create`/`update`/`deleteServicePackage` follow the exact same permission/visibility pattern as
+> `ServiceOfferingAddOn` below. Also reachable nested via `ServiceOffering.packages` (lazy,
+> same visibility filter). `pricePerSession` goes through a type-level `Number()` conversion.
 
 ---
 
-### Model: `ServiceOfferingAddOn` → table `service_offering_add_ons`
+### Model: `ServiceOfferingAddOn` → table `"ServiceOfferingAddOn"`
 
 An optional extra charge attached to a `ServiceOffering` (e.g., "Additional Dog").
 
@@ -548,11 +578,9 @@ An optional extra charge attached to a `ServiceOffering` (e.g., "Additional Dog"
 | `perSession`        | Boolean | default `true` — whether the charge is per session or flat |
 | `isActive`          | Boolean | default `true`                                   |
 
-> **GraphQL/resolver status:** same situation as `ServiceOffering` above — `typeDefs.ts` declares
-> a `ServiceOfferingAddOn` type, `Create`/`UpdateServiceAddOnInput`, and
-> `get`/`create`/`update`/`deleteServiceAddOn` operations, and `validate.ts` has matching Zod
-> schemas, but no `resolvers/service/` files or `resolvers/index.ts` wiring exist. Declared but
-> unimplemented.
+> **GraphQL/resolver status:** full CRUD implemented in `resolvers/service/`
+> (`getServiceAddOn(s)`, `create`/`update`/`deleteServiceAddOn`) — see `Service Resolver Behavior`
+> in §10. `pricePerSession` goes through a type-level `Number()` conversion.
 
 ---
 
@@ -584,10 +612,11 @@ with exactly one `Job` and `servicePackageId: null`.
 
 **Indexes:** `businessId`, `customerId`
 
-> **GraphQL/resolver status:** created by `createBooking` (`resolvers/job/mutations/createBooking.ts`).
-> Returned as the `Booking` GraphQL type; `jobs` and `addOns` are resolved lazily via type-level
-> field resolvers rather than a Prisma `include` — see `Job Resolver Behavior` in §10. There is no
-> query yet to look up a `Booking` after creation (e.g. by id, or "my bookings for this business").
+> **GraphQL/resolver status:** created by `createBooking` (`resolvers/job/mutations/createBooking.ts`)
+> and listed by `getMyBookings` (customer's bookings, newest first). Returned as the `Booking`
+> GraphQL type; `jobs` and `addOns` are resolved lazily via type-level field resolvers rather than
+> a Prisma `include` — see `Job Resolver Behavior` in §10. There is still no single-booking lookup
+> by id and no business-side booking list (owners see per-session `Job`s via `getBusinessJobs`).
 
 ---
 
@@ -684,13 +713,13 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 **Indexes:** `bookingId`, `businessId`, `customerId`
 
 > **GraphQL/resolver status:** created via `createBooking`; transitioned via `acceptJob`,
-> `declineJob`, `assignSitter`, `clockIn`, `clockOut`, `completeJob` (`resolvers/job/mutations/`).
-> See `Job Resolver Behavior` in §10 for the enforced status state machine. No listing/lookup query
-> exists yet for `Job` itself. `updates` (`JobUpdate`) and `review` (`Review`) are now written via
-> `postJobUpdate`/`leaveReview` respectively, but neither is exposed as a `Job.updates`/`Job.review`
-> field on the GraphQL type — fetch them independently (there's no `getJobUpdates` query either; the
-> live "Updates" feed has no listing query yet, only the `postJobUpdate` write side). `conversation`
-> still has no resolvers at all.
+> `declineJob`, `assignSitter`, `clockIn`, `clockOut`, `completeJob` (`resolvers/job/mutations/`);
+> read via `getJob`, `getBusinessJobs`, `getMyJobs` (see `Job Resolver Behavior` in §10 for both
+> the status state machine and the read-side access rules). The GraphQL `Job` type exposes lazy
+> `customer`/`service`/`assignee`/`pets` relations for display; `updates` are fetched via the
+> separate `getJobUpdates` query (not a `Job.updates` field), and `review`/`reportCard`/
+> `conversation` are not exposed on the type at all — `conversation` still has no resolvers
+> anywhere.
 
 ---
 
@@ -737,10 +766,11 @@ feed on the live job-tracking screen. A job has many updates.
 
 **Indexes:** `(jobId, createdAt desc)` — for reverse-chronological feed paging
 
-> **GraphQL/resolver status:** created via `postJobUpdate` (`resolvers/job/mutations/postJobUpdate.ts`).
-> Only the job's assigned sitter may post, and only while `Job.status` is `IN_PROGRESS`. No listing
-> query exists yet — there is no `getJobUpdates(jobId)` to page through the `(jobId, createdAt desc)`
-> index this model was built for; the live "Updates" feed currently has a write side only.
+> **GraphQL/resolver status:** created via `postJobUpdate` (`resolvers/job/mutations/postJobUpdate.ts`);
+> read via `getJobUpdates(jobId, limit, before)` (`resolvers/job/queries/getJobUpdates.ts`), which
+> pages through the `(jobId, createdAt desc)` index exactly as designed — newest first, `before` as
+> a `createdAt` cursor. Posting is assigned-sitter-only while `IN_PROGRESS`; reading uses the shared
+> `assertJobViewAccess` rule (customer / assigned sitter / OWNER-MANAGER).
 
 ---
 
@@ -876,24 +906,20 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 ### Resolver Registration Status
 
-The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` are expected to stay
-in lockstep, but **currently do not** for the service domain. The root resolver map explicitly
-spreads the user, business, customer, job, and review query and mutation barrels, so all declared
-user/business/customer/job/review operations below are callable. `registerOwner` is registered only
-as a mutation. The `job` domain exports exactly one query (`getAvailableEmployees`) — there is
-still no way to list/look up jobs or bookings themselves through GraphQL; every job mutation other
-than `createBooking` takes an ID supplied by the caller. The `job` and `business` domains also
-register **type-level** field resolvers (`Job`, `Booking`, `BookingAddOn`, and now `Business`)
-spread directly onto the root resolver map alongside `Query`/`Mutation`/`JSON` — these back
-computed/gated fields (see `Job Resolver Behavior` and `Business Resolver Behavior` below), not
-root operations.
-
-> **Known gap:** `typeDefs.ts` declares a full CRUD surface for `ServiceOffering` and
-> `ServiceOfferingAddOn` (5 queries/mutations each — see the tables below) and `validate.ts` has
-> matching Zod schemas, but there is no `resolvers/service/` domain and `resolvers/index.ts` does
-> not spread one. These SDL fields have zero backing resolver functions. Building the service
-> domain (queries + mutations + barrel + wiring into `resolvers/index.ts`) per the §12 checklist
-> is the next step before this feature is usable.
+The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` are expected to stay,
+and currently do stay, in lockstep — every domain's barrel is spread into the root map: user,
+business, customer, job, review, and service all contribute `Query` fields; invitation, owner,
+customer, utils, user, business, job, review, and service all contribute `Mutation` fields.
+`registerOwner` is registered only as a mutation. The job domain has a full read side —
+`getMyBookings`, `getBusinessJobs`, `getMyJobs`, `getJob`, `getJobUpdates`, plus
+`getAvailableEmployees` — so jobs and bookings are discoverable through GraphQL, not just mutable
+by ID. The service domain has full CRUD for `ServiceOffering`, `ServiceOfferingAddOn`, and
+`ServicePackage` — see `Service Resolver Behavior` below for its member-vs-public read visibility
+rule, which is the one non-obvious thing about it. Several domains also register **type-level**
+field resolvers (`Job`, `Booking`, `BookingAddOn`, `Business`, `CustomerProfile`,
+`ServiceOffering`, `ServiceOfferingAddOn`, `ServicePackage`) spread directly onto the root resolver
+map alongside `Query`/`Mutation`/`JSON` — these back computed/gated/lazy fields (see the per-domain
+behavior sections below), not root operations.
 
 ### Declared Queries
 
@@ -908,11 +934,17 @@ root operations.
 | `getNearbyBusinesses` | `latitude: Float!, longitude: Float!, radiusMiles: Float, category: String, search: String, limit: Int` | `[NearbyBusiness!]!` | No | `resolvers/business/queries/getNearbyBusinesses.ts` — PostGIS `$queryRaw`; see `Business Resolver Behavior` below |
 | `getMyPets`   | none            | `[Pet!]!`          | Yes (JWT)     | `resolvers/customer/queries/getMyPets.ts` — returns only `isActive: true` pets scoped to the caller's `CustomerProfile` |
 | `getBusinessReviews` | `businessId: ID!` | `[Review!]!` | No | `resolvers/review/queries/getBusinessReviews.ts` — public-profile data; returns only `isPublic: true` reviews, ordered by `createdAt` descending |
-| `getAvailableEmployees` | `jobId: ID!` | `[EmployeeAvailabilityStatus!]!` | Yes (active OWNER/MANAGER) | `resolvers/job/queries/getAvailableEmployees.ts` — job's first query; see `Job Resolver Behavior` below for the availability + conflict-check algorithm |
-| `getServiceOffering` ⚠️ | `serviceOfferingId: ID!` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists. Calling this will error/no-op.** |
-| `getServiceOfferings` ⚠️ | `businessId: ID!` | `[ServiceOffering!]!` | — | **Declared in SDL only — no resolver file exists.** |
-| `getServiceAddOn` ⚠️ | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
-| `getServiceAddOns` ⚠️ | `serviceOfferingId: ID!` | `[ServiceOfferingAddOn!]!` | — | **Declared in SDL only — no resolver file exists.** |
+| `getAvailableEmployees` | `jobId: ID!` | `[EmployeeAvailabilityStatus!]!` | Yes (active OWNER/MANAGER) | `resolvers/job/queries/getAvailableEmployees.ts` — see `Job Resolver Behavior` below for the availability + conflict-check algorithm |
+| `getMyBookings` | none | `[Booking!]!` | Yes (JWT + CustomerProfile) | `resolvers/job/queries/getMyBookings.ts` — caller's bookings, newest first; per-session detail via the lazy `Booking.jobs` field |
+| `getBusinessJobs` | `businessId: ID!, statuses: [String!], from: String, to: String` | `[Job!]!` | Yes (active OWNER/MANAGER) | `resolvers/job/queries/getBusinessJobs.ts` — dashboard/requests/schedule views; `statuses` filters, `from`/`to` bound `scheduledStartTime`; ordered by `scheduledStartTime` asc |
+| `getMyJobs` | `statuses: [String!], from: String, to: String` | `[Job!]!` | Yes (JWT) | `resolvers/job/queries/getMyJobs.ts` — jobs assigned to the caller across all their **active** memberships (deactivated membership = excluded); same filters as `getBusinessJobs` |
+| `getJob` | `jobId: ID!` | `Job!` | Yes (job's customer, assigned sitter, or active OWNER/MANAGER) | `resolvers/job/queries/getJob.ts` — access via shared `assertJobViewAccess` (`job/jobAccess.ts`) |
+| `getJobUpdates` | `jobId: ID!, limit: Int, before: String` | `[JobUpdate!]!` | Yes (same access as `getJob`) | `resolvers/job/queries/getJobUpdates.ts` — newest first; `before` is a `createdAt` cursor (pass the oldest you have for the next page); `limit` defaults 50, max 100 |
+| `getServiceOffering` | `serviceOfferingId: ID!` | `ServiceOffering!` | Member-vs-public (see `Service Resolver Behavior`) | `resolvers/service/queries/getServiceOffering.ts` |
+| `getServiceOfferings` | `businessId: ID!` | `[ServiceOffering!]!` | Member-vs-public | `resolvers/service/queries/getServiceOfferings.ts` |
+| `getServiceAddOn` | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | Member-vs-public | `resolvers/service/queries/getServiceAddOn.ts` |
+| `getServiceAddOns` | `serviceOfferingId: ID!` | `[ServiceOfferingAddOn!]!` | Member-vs-public | `resolvers/service/queries/getServiceAddOns.ts` |
+| `getServicePackages` | `serviceOfferingId: ID!` | `[ServicePackage!]!` | Member-vs-public | `resolvers/service/queries/getServicePackages.ts` |
 
 ### Declared Mutations
 
@@ -944,12 +976,15 @@ root operations.
 | `leaveReview`       | `LeaveReviewInput`       | `Review!`          | Yes (job owner + job `COMPLETED`) | `resolvers/review/mutations/leaveReview.ts` — one review per job (enforced via `Review.jobId` uniqueness + an explicit pre-check); recomputes and writes `Business.avgRating`/`reviewCount` in the same transaction — see `Review Resolver Behavior` below |
 | `postJobUpdate`     | `PostJobUpdateInput`     | `JobUpdate!`       | Yes (assigned sitter only, job `IN_PROGRESS`) | `resolvers/job/mutations/postJobUpdate.ts` — at least one of `note`/`photoUrl` required |
 | `submitReportCard`  | `SubmitReportCardInput`  | `ReportCard!`      | Yes (assigned sitter only, job `COMPLETED`) | `resolvers/job/mutations/submitReportCard.ts` — one report card per job |
-| `createServiceOffering` ⚠️ | `CreateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
-| `updateServiceOffering` ⚠️ | `UpdateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
-| `deleteServiceOffering` ⚠️ | `serviceOfferingId: ID!` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
-| `createServiceAddOn` ⚠️ | `CreateServiceAddOnInput` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
-| `updateServiceAddOn` ⚠️ | `UpdateServiceAddOnInput` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
-| `deleteServiceAddOn` ⚠️ | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
+| `createServiceOffering` | `CreateServiceOfferingInput` | `ServiceOffering!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/createServiceOffering.ts` — created active by default (unlike `registerOwner`'s seed offerings) |
+| `updateServiceOffering` | `UpdateServiceOfferingInput` | `ServiceOffering!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/updateServiceOffering.ts` — partial update; `category`/`basePrice` accept explicit `null` to clear |
+| `deleteServiceOffering` | `serviceOfferingId: ID!` | `ServiceOffering!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/deleteServiceOffering.ts` — soft delete; does not touch its packages/add-ons |
+| `createServiceAddOn` | `CreateServiceAddOnInput` | `ServiceOfferingAddOn!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/createServiceAddOn.ts` |
+| `updateServiceAddOn` | `UpdateServiceAddOnInput` | `ServiceOfferingAddOn!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/updateServiceAddOn.ts` — partial update |
+| `deleteServiceAddOn` | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/deleteServiceAddOn.ts` — soft delete |
+| `createServicePackage` | `CreateServicePackageInput` | `ServicePackage!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/createServicePackage.ts` — `sessionsCount` defaults to `1` when omitted |
+| `updateServicePackage` | `UpdateServicePackageInput` | `ServicePackage!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/updateServicePackage.ts` — partial update |
+| `deleteServicePackage` | `servicePackageId: ID!` | `ServicePackage!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/deleteServicePackage.ts` — soft delete |
 
 ### GraphQL Input Types
 
@@ -974,18 +1009,21 @@ root operations.
 | `LeaveReviewInput` | `jobId`, `rating`, `comment?`, `tags?` | Zod schema (`leaveReviewSchema`) requires `rating` between 1–5. `businessId`/`customerId` are deliberately not accepted — both are derived from the job. `tags` defaults to `[]` if omitted. |
 | `PostJobUpdateInput` | `jobId`, `note?`, `photoUrl?` | Zod schema (`postJobUpdateSchema`) requires at least one of `note`/`photoUrl` (object-level `.refine()`). |
 | `SubmitReportCardInput` | `jobId`, all other fields optional | Zod schema (`submitReportCardSchema`). `mood` must be a valid `PetMood` enum value if provided; omitted fields fall back to the model's Prisma defaults (`peeCount`/`poopCount` → `0`, the boolean flags → `false`). |
-| `CreateServiceOfferingInput` | `businessId`, `title`, `description`, `durationMinutes` | Zod schema (`createServiceOfferingSchema`) exists in `validate.ts`; no resolver consumes it yet. |
-| `UpdateServiceOfferingInput` | `serviceOfferingId`, `title?`, `description?`, `durationMinutes?`, `isActive?` | Zod schema (`updateServiceOfferingSchema`) requires a UUID id and at least one other field; no resolver consumes it yet. |
-| `CreateServiceAddOnInput` | `serviceOfferingId`, `title`, `pricePerSession`, `perSession?` | Zod schema (`createServiceAddOnSchema`) requires a positive price with ≤2 decimal places; no resolver consumes it yet. |
-| `UpdateServiceAddOnInput` | `serviceAddOnId`, `title?`, `pricePerSession?`, `perSession?`, `isActive?` | Zod schema (`updateServiceAddOnSchema`) requires a UUID id and at least one other field; no resolver consumes it yet. |
+| `CreateServiceOfferingInput` | `businessId`, `title`, `description`, `durationMinutes`, `category?`, `basePrice?`, `features?` | Zod schema (`createServiceOfferingSchema`). `category` must be a valid `ServiceCategory`; `basePrice` a positive price with ≤2 decimal places; `features` capped at 10 entries. |
+| `UpdateServiceOfferingInput` | `serviceOfferingId`, all other fields optional | Zod schema (`updateServiceOfferingSchema`) requires a UUID id and at least one other field. `category`/`basePrice` accept explicit `null` to clear; `features`, when provided, replaces the whole array. |
+| `CreateServiceAddOnInput` | `serviceOfferingId`, `title`, `pricePerSession`, `perSession?` | Zod schema (`createServiceAddOnSchema`) requires a positive price with ≤2 decimal places. |
+| `UpdateServiceAddOnInput` | `serviceAddOnId`, `title?`, `pricePerSession?`, `perSession?`, `isActive?` | Zod schema (`updateServiceAddOnSchema`) requires a UUID id and at least one other field. |
+| `CreateServicePackageInput` | `serviceOfferingId`, `title`, `sessionsCount?`, `pricePerSession` | Zod schema (`createServicePackageSchema`). `sessionsCount` defaults to `1` and caps at `52` — matching `createBookingSchema`'s `sessions` ceiling, since a package no booking could ever fulfill would be a mistake. |
+| `UpdateServicePackageInput` | `servicePackageId`, all other fields optional | Zod schema (`updateServicePackageSchema`) requires a UUID id and at least one other field. |
 
-> **`getNearbyBusinesses` has no input type** — its six args (`latitude`, `longitude`, `radiusMiles`,
-> `category`, `search`, `limit`) are declared directly on the query field, not wrapped in an
-> `input`. It's still Zod-validated (`getNearbyBusinessesSchema`), which is a deliberate deviation
-> from every other query in this codebase (queries elsewhere use lightweight inline checks, not
-> Zod) — justified specifically because this resolver builds raw SQL; see `Business Resolver
-> Behavior` below. `radiusMiles` defaults to `25` (max `100`), `limit` defaults to `20` (max `50`) —
-> both bounds exist to cap the underlying query's cost, not just for a friendly error message.
+> **Queries with non-trivial args take them directly (no `input` wrapper) but are still
+> Zod-validated** — `getNearbyBusinesses` (`getNearbyBusinessesSchema`), `getBusinessJobs`
+> (`getBusinessJobsSchema`), `getMyJobs` (`getMyJobsSchema`), and `getJobUpdates`
+> (`getJobUpdatesSchema`). Simple single-ID queries keep the lightweight inline checks used
+> elsewhere. For `getNearbyBusinesses`, `radiusMiles` defaults to `25` (max `100`) and `limit`
+> defaults to `20` (max `50`) — bounds that cap the underlying raw-SQL query's cost, not just
+> produce friendly errors. The job list filters validate `statuses` against the seven `JobStatus`
+> values and coerce `from`/`to`/`before` date strings via `z.coerce.date`.
 
 ### GraphQL Object Types
 
@@ -999,15 +1037,17 @@ root operations.
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
 | `BusinessMember`   | `id, role, isActive, joinedAt, user: User!` | Returned by `getBusinessMembers`, `removeMember` |
 | `Pet`              | All `Pet` model fields including `isActive` | Returned by `getMyPets`, `addPet`, `updatePet`, `deletePet`. `weightLb` is `Float?`; the underlying Prisma `Decimal` must be converted with `Number()` in resolvers before returning. |
-| `Job`              | Nearly all `Job` model fields | `price` and `tipAmount` are `Float`/`Float?` resolved via type-level field resolvers (`Number()` conversion from Prisma `Decimal`). `pets` is resolved lazily (a `Pet.findMany` keyed by the job, not an `include`). `accessCode` is resolved via a gated field resolver — see `Job Resolver Behavior` below; it is **not** a plain passthrough field. `status` is a raw `String!` (not a GraphQL enum) covering all seven `JobStatus` values including `DECLINED`. |
-| `Booking`          | All `Booking` model fields, plus `jobs: [Job!]!` and `addOns: [BookingAddOn!]!` | `totalPrice` is `Float!` via a type-level resolver. `jobs` and `addOns` are both resolved lazily (separate queries keyed by `bookingId`), not via Prisma `include` — see `Job Resolver Behavior` below. Only returned today by `createBooking`; there is no query to look one up later. |
+| `Job`              | Nearly all `Job` model fields, plus lazy `pets`, `customer: CustomerProfile!`, `service: ServiceOffering!`, `assignee: BusinessMember` | `price` and `tipAmount` are `Float`/`Float?` resolved via type-level field resolvers (`Number()` conversion from Prisma `Decimal`). `pets`/`customer`/`service`/`assignee` are resolved lazily (own queries keyed off the parent, not `include`s) — the display relations list screens need ("Alex R. · Biscuit · Walk"). `accessCode` is resolved via a gated field resolver — see `Job Resolver Behavior` below; it is **not** a plain passthrough field. `status` is a raw `String!` (not a GraphQL enum) covering all seven `JobStatus` values including `DECLINED`. |
+| `Booking`          | All `Booking` model fields, plus `jobs: [Job!]!` and `addOns: [BookingAddOn!]!` | `totalPrice` is `Float!` via a type-level resolver. `jobs` and `addOns` are both resolved lazily (separate queries keyed by `bookingId`), not via Prisma `include` — see `Job Resolver Behavior` below. Returned by `createBooking` and listed via `getMyBookings`. |
+| `CustomerProfile`  | `id, address?, city?, user: User!` | Reachable nested via `Job.customer`. `user` resolves lazily via a type-level resolver (`customerResolvers.ts`). Deliberately minimal — no pets/jobs/location exposure through this type. |
 | `BookingAddOn`     | `id, priceAtBooking, addOn: ServiceOfferingAddOn!` | `priceAtBooking` is `Float!` via a type-level resolver (snapshotted add-on price at purchase time, independent of the add-on's current price). |
 | `Review`           | All `Review` model fields | Returned by `leaveReview`, `getBusinessReviews`. No `customer`/`user` field — the reviewer's name isn't exposed anywhere on this type yet. |
 | `JobUpdate`        | All `JobUpdate` model fields | Returned by `postJobUpdate`. No plain field resolvers needed (no Decimal fields, nothing sensitive). |
 | `ReportCard`       | All `ReportCard` model fields | Returned by `submitReportCard`. `mood` is a raw `String` (not a GraphQL enum), matching the `PetType`/`PetSex`/`JobStatus` convention elsewhere. |
 | `EmployeeAvailabilityStatus` | `member: BusinessMember!, isAvailable: Boolean!, conflictReason: String` | Not a Prisma model — a computed shape returned only by `getAvailableEmployees`. `member` already carries its `user` relation (fetched via the same `include: { user: true }` pattern as `getBusinessMembers`), so no extra field resolver is needed for it. |
-| `ServiceOffering`  | `id, businessId, title, description, durationMinutes, isActive, addOns: [ServiceOfferingAddOn!]!` | Declared in SDL only — no resolver returns this type yet. Does not expose `packages` (the `ServicePackage[]` relation is not in the GraphQL schema at all). |
-| `ServiceOfferingAddOn` | `id, serviceOfferingId, title, pricePerSession, perSession, isActive` | Declared in SDL only — no resolver returns this type yet. `pricePerSession` is `Float!`; the underlying Prisma field is `Decimal` and will need explicit `Number()` conversion in whatever resolver is written, since Decimal instances aren't natively serializable as a GraphQL Float. |
+| `ServiceOffering`  | `id, businessId, title, category?, description, basePrice?, durationMinutes, features, isActive, addOns: [ServiceOfferingAddOn!]!, packages: [ServicePackage!]!` | Also reachable nested via `Job.service`. `basePrice` converts Decimal→Number via the type-level map in `serviceResolvers.ts`; `addOns`/`packages` resolve lazily there too, applying the same member-vs-public visibility filter as `getServiceAddOns`/`getServicePackages` (see `Service Resolver Behavior` in §10). |
+| `ServiceOfferingAddOn` | `id, serviceOfferingId, title, pricePerSession, perSession, isActive` | Reachable nested via `ServiceOffering.addOns` and `BookingAddOn.addOn`. `pricePerSession` converts Decimal→Number via the type-level map in `serviceResolvers.ts`. |
+| `ServicePackage`   | `id, serviceOfferingId, title, sessionsCount, pricePerSession, isActive` | Reachable nested via `ServiceOffering.packages`. `pricePerSession` converts Decimal→Number via the type-level map in `serviceResolvers.ts`. |
 
 ### `AcceptInvitationInput` — Two-Path Logic
 
@@ -1080,11 +1120,21 @@ The following handlers are implemented and registered through `resolvers/custome
 
 ### Job Resolver Behavior
 
-The following handlers are implemented and registered through `resolvers/job/`. There is still no
-way to list or look up a `Job`/`Booking` itself (see the known gap above) — every mutation here is
-given a `jobId` (or IDs) by the caller; nothing generates or discovers them server-side beyond
-`createBooking`. `getAvailableEmployees` is the one query, and it's read-only over existing jobs and
-`BusinessMember`/`EmployeeAvailability` rows, not a way to browse `Job`s themselves.
+The following handlers are implemented and registered through `resolvers/job/`.
+
+**Listing/lookup queries** — the read side that makes the lifecycle mutations reachable:
+- `getMyBookings` (customer): bookings for the caller's `CustomerProfile`, newest first.
+- `getBusinessJobs` (active OWNER/MANAGER): a business's jobs, optional `statuses` filter (e.g.
+  `["PENDING"]` = the requests inbox) and `from`/`to` window on `scheduledStartTime` (the day/week
+  schedule). Ordered by `scheduledStartTime` ascending. EMPLOYEEs are refused — they use `getMyJobs`.
+- `getMyJobs` (any JWT): jobs whose `assignee` membership belongs to the caller **and is still
+  active** — a sitter removed from a business stops seeing that business's jobs. Spans all of the
+  caller's businesses; same filters/ordering as `getBusinessJobs`.
+- `getJob` / `getJobUpdates`: single-job detail and the update feed (newest first; `before`
+  `createdAt` cursor + `limit` ≤ 100). Both authorize via the shared `assertJobViewAccess`
+  (`job/jobAccess.ts`): the job's customer, the assigned sitter (active membership), or an active
+  OWNER/MANAGER of the job's business. The rule lives in one place so the two reads can't drift;
+  mutations keep their own stricter role-specific checks.
 
 **`createBooking`** — the only entry point that creates `Job` rows. Resolves the caller's
 `CustomerProfile`, then validates against the DB (not just Zod): the `Business` and
@@ -1152,7 +1202,7 @@ fields, defined in `job/jobResolvers.ts` and spread onto the root resolver map's
 regardless of which query or mutation returned the object:
 - `Job.accessCode` resolves to the real value only if the caller is an active `OWNER`/`MANAGER` of the job's business, or the `BusinessMember` matching `job.assigneeId` — otherwise `null`. It performs its own `businessMember` lookup per call, independent of whatever authorization already ran in the parent mutation.
 - `Job.price`, `Job.tipAmount`, `Booking.totalPrice`, `BookingAddOn.priceAtBooking` convert Prisma `Decimal` to `Number` before they reach the GraphQL `Float` scalar (see the `ServiceOfferingAddOn` warning above — Decimal instances are not natively serializable there).
-- `Job.pets`, `Booking.jobs`, `Booking.addOns` are resolved lazily via their own Prisma queries keyed off the parent's `id` — mutations that return a `Job`/`Booking` do not `include` these relations, so they're only fetched when a client actually asks for them.
+- `Job.pets`, `Job.customer`, `Job.service`, `Job.assignee`, `Booking.jobs`, `Booking.addOns` are resolved lazily via their own Prisma queries keyed off the parent — mutations/queries that return a `Job`/`Booking` do not `include` these relations, so they're only fetched when a client actually asks for them. `Job.assignee` includes its `user` (matching the `BusinessMember` GraphQL type's non-null `user` field); `Job.customer` returns a `CustomerProfile` whose `user` resolves via the customer domain's own type-level map.
 
 ### Review Resolver Behavior
 
@@ -1161,6 +1211,34 @@ The following handlers are implemented and registered through `resolvers/review/
 - `leaveReview` resolves the caller's `CustomerProfile`, then loads the target `Job` and checks, in order: the job's `customerId` matches the caller (`FORBIDDEN` otherwise — you can only review jobs you booked), the job's `status` is `COMPLETED` (`BAD_USER_INPUT` otherwise), and no `Review` already exists for that `jobId` (`BAD_USER_INPUT` — this is also enforced at the DB level by `Review.jobId` being `@unique`, but the resolver checks first to give a clean error instead of surfacing a raw constraint violation). `businessId`/`customerId` on the created row come from the job/caller, never from client input.
 - **Aggregate sync**: in the same `$transaction` as the `Review` insert, `leaveReview` runs `review.aggregate({ where: { businessId, isPublic: true }, _avg: { rating: true }, _count: true })` and writes the result straight to `Business.avgRating`/`reviewCount`. This recomputes from scratch rather than incrementing a running average — same "derive, don't mutate in place" philosophy as the financial ledger (§11) — so there's no drift risk from repeated incremental arithmetic. This is the **only** place that writes `Business.avgRating`/`reviewCount`; anything that later adds `updateReview`/`deleteReview` must repeat this same recompute-and-write or the aggregate will go stale (see the note on `Business.avgRating` in §9).
 - `getBusinessReviews` requires no authentication (it's public-profile data) and returns only `isPublic: true` reviews for the given `businessId`, ordered by `createdAt` descending. It 404s if the business itself doesn't exist, but does not check `Business.isActive`.
+
+### Service Resolver Behavior
+
+The following handlers are implemented and registered through `resolvers/service/`, covering
+`ServiceOffering`, `ServiceOfferingAddOn`, and `ServicePackage` — three models with identical
+read/write rules, sharing two helpers in `service/serviceAccess.ts`:
+
+- **`requireBusinessManager(businessId, context)`** — throws unless the caller is an active
+  `OWNER`/`MANAGER` of that business. Every create/update/delete mutation across all three models
+  calls this after resolving the target row's owning `businessId` (for add-ons and packages, via
+  their parent `ServiceOffering`).
+- **`isActiveMember(businessId, context)`** — returns a boolean, never throws. Every read (both the
+  dedicated `get*` queries and the `ServiceOffering.addOns`/`.packages` type-level lazy fields) uses
+  this to pick one of two views: **member view** (any active role) returns every row regardless of
+  `isActive`; **public view** (everyone else, including unauthenticated callers) returns only
+  `isActive: true` rows of an `isActive: true` business, and 404s (`NOT_FOUND`) rather than
+  `FORBIDDEN` if the target is inactive/hidden — same "don't confirm something exists" reasoning as
+  `updatePet`/`deletePet`'s 404-on-mismatch pattern. **This is deliberately not JWT-gated at all** —
+  unlike almost every other read in this codebase, an anonymous caller can browse a business's
+  active service catalog, because that's the public storefront (the business detail / service
+  detail screens).
+
+The three delete mutations (`deleteServiceOffering`, `deleteServiceAddOn`, `deleteServicePackage`)
+are all soft deletes (`isActive: false`) and all reject an already-inactive target with
+`BAD_USER_INPUT`, matching `deactivateBusiness`'s precedent. `createServiceOffering` creates the
+offering **active by default** — a deliberate contrast with `registerOwner`'s seed offerings, which
+are created inactive since they're placeholders the owner hasn't configured yet, not something a
+caller explicitly asked to publish.
 
 ### Scalar Types
 
