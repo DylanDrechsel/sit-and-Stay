@@ -33,7 +33,15 @@ export const login = async (
         });
     }
 
-    // 3. Compare password
+    // 3. Compare password — passwordHash is null for OAuth-only accounts (Google/Apple),
+    //    which can't log in via this mutation. Same generic error either way, to avoid
+    //    revealing which sign-in method an email is registered with.
+    if (user.passwordHash == null) {
+        throw new GraphQLError('Invalid email or password', {
+            extensions: { code: 'UNAUTHENTICATED' },
+        });
+    }
+
     const valid = await comparePassword(password, user.passwordHash);
     if (valid === false) {
         throw new GraphQLError('Invalid email or password', {

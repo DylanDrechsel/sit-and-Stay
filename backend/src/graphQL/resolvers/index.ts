@@ -6,6 +6,7 @@ import { utilsResolvers } from './utils/utilsResolvers.js';
 import { userResolvers } from './user/userResolvers.js';
 import { businessResolvers } from './business/businessResolvers.js';
 import { jobResolvers } from './job/jobResolvers.js';
+import { reviewResolvers } from './review/reviewResolvers.js';
 
 export default {
     Query: {
@@ -14,6 +15,7 @@ export default {
         ...businessResolvers.Query,
         ...customerResolvers.Query,
         ...jobResolvers.Query,
+        ...reviewResolvers.Query,
     },
     Mutation: {
         ...invitationResolvers.Mutation,
@@ -23,6 +25,7 @@ export default {
         ...userResolvers.Mutation,
         ...businessResolvers.Mutation,
         ...jobResolvers.Mutation,
+        ...reviewResolvers.Mutation,
     },
     Job: jobResolvers.Job,
     Booking: jobResolvers.Booking,

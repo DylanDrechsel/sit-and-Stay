@@ -37,14 +37,53 @@ export const addPet = async (
         });
     }
 
-    const { type, sex, ...rest } = parsed.data;
+    const {
+        name, type, breed, age, sex, weightLb, photoUrl,
+        isNeutered, isMicrochipped, medicalNotes, careInstructions,
+        homeAccessNotes, vetName, vetClinic, vetPhone,
+    } = parsed.data;
 
-    return context.prisma.pet.create({
-        data: {
-            customerId: customer.id,
-            type: type as 'DOG' | 'CAT' | 'BIRD' | 'RABBIT' | 'REPTILE' | 'OTHER',
-            sex: sex as 'MALE' | 'FEMALE' | undefined,
-            ...rest,
-        },
-    });
+    // Build the create payload explicitly — only include fields that were
+    // provided. Spreading the parsed object directly would carry Zod's
+    // `T | undefined` optional types straight into Prisma's input type, which
+    // exactOptionalPropertyTypes rejects (Prisma expects `T | null`, not
+    // `T | undefined`, on these optional fields).
+    const petData: {
+        customerId: string;
+        name: string;
+        type: 'DOG' | 'CAT' | 'BIRD' | 'RABBIT' | 'REPTILE' | 'OTHER';
+        breed?: string;
+        age?: number;
+        sex?: 'MALE' | 'FEMALE';
+        weightLb?: number;
+        photoUrl?: string;
+        isNeutered?: boolean;
+        isMicrochipped?: boolean;
+        medicalNotes?: string;
+        careInstructions?: string;
+        homeAccessNotes?: string;
+        vetName?: string;
+        vetClinic?: string;
+        vetPhone?: string;
+    } = {
+        customerId: customer.id,
+        name,
+        type,
+    };
+
+    if (breed !== undefined) petData.breed = breed;
+    if (age !== undefined) petData.age = age;
+    if (sex !== undefined) petData.sex = sex;
+    if (weightLb !== undefined) petData.weightLb = weightLb;
+    if (photoUrl !== undefined) petData.photoUrl = photoUrl;
+    if (isNeutered !== undefined) petData.isNeutered = isNeutered;
+    if (isMicrochipped !== undefined) petData.isMicrochipped = isMicrochipped;
+    if (medicalNotes !== undefined) petData.medicalNotes = medicalNotes;
+    if (careInstructions !== undefined) petData.careInstructions = careInstructions;
+    if (homeAccessNotes !== undefined) petData.homeAccessNotes = homeAccessNotes;
+    if (vetName !== undefined) petData.vetName = vetName;
+    if (vetClinic !== undefined) petData.vetClinic = vetClinic;
+    if (vetPhone !== undefined) petData.vetPhone = vetPhone;
+
+    return context.prisma.pet.create({ data: petData });
 };
