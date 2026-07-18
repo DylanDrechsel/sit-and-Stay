@@ -11,6 +11,7 @@ export default {
         healthCheck: () => 'Server is up and running smoothly!',
         ...userResolvers.Query,
         ...businessResolvers.Query,
+        ...customerResolvers.Query,
     },
     Mutation: {
         ...invitationResolvers.Mutation,

@@ -73,6 +73,27 @@ const typeDefs = `#graphql
     isActive: Boolean!
   }
 
+  # A pet belonging to the authenticated customer
+  type Pet {
+    id: ID!
+    name: String!
+    type: String!         # DOG | CAT | BIRD | RABBIT | REPTILE | OTHER
+    breed: String
+    age: Int
+    sex: String            # MALE | FEMALE
+    weightLb: Float
+    photoUrl: String
+    isNeutered: Boolean!
+    isMicrochipped: Boolean!
+    medicalNotes: String
+    careInstructions: String
+    homeAccessNotes: String
+    vetName: String
+    vetClinic: String
+    vetPhone: String
+    isActive: Boolean!
+  }
+
   # ── Inputs ─────────────────────────────────────────────────────────
 
   input RegisterCustomerInput {
@@ -183,6 +204,48 @@ const typeDefs = `#graphql
     isActive: Boolean
   }
 
+  # ── Pet inputs ————————————————————————————————————
+
+  input AddPetInput {
+    name: String!
+    type: String!         # DOG | CAT | BIRD | RABBIT | REPTILE | OTHER
+    breed: String
+    age: Int
+    sex: String            # MALE | FEMALE
+    weightLb: Float
+    photoUrl: String
+    isNeutered: Boolean
+    isMicrochipped: Boolean
+    medicalNotes: String
+    careInstructions: String
+    homeAccessNotes: String
+    vetName: String
+    vetClinic: String
+    vetPhone: String
+  }
+
+  # petId is required; all other fields are optional (partial update).
+  # Pass an empty string for a clearable text field to clear it.
+  # At least one field besides petId must be provided.
+  input UpdatePetInput {
+    petId: ID!
+    name: String
+    type: String
+    breed: String
+    age: Int
+    sex: String
+    weightLb: Float
+    photoUrl: String
+    isNeutered: Boolean
+    isMicrochipped: Boolean
+    medicalNotes: String
+    careInstructions: String
+    homeAccessNotes: String
+    vetName: String
+    vetClinic: String
+    vetPhone: String
+  }
+
   # ── Queries ────────────────────────────────────────────────────────
 
   type Query {
@@ -214,6 +277,9 @@ const typeDefs = `#graphql
 
     # Returns all add-ons (active and inactive) for a service offering (requires JWT + active business membership)
     getServiceAddOns(serviceOfferingId: ID!): [ServiceOfferingAddOn!]!
+
+    # Returns the authenticated customer's active pets, ordered by name (requires JWT + CustomerProfile)
+    getMyPets: [Pet!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -281,6 +347,17 @@ const typeDefs = `#graphql
 
     # Soft-deletes a service add-on by setting isActive to false (OWNER or MANAGER only)
     deleteServiceAddOn(serviceAddOnId: ID!): ServiceOfferingAddOn!
+
+    # ── Pet mutations ————————————————————————————
+
+    # Adds a pet to the authenticated customer's profile (requires JWT + CustomerProfile)
+    addPet(input: AddPetInput!): Pet!
+
+    # Partial update of one of the authenticated customer's own pets (requires JWT + ownership)
+    updatePet(input: UpdatePetInput!): Pet!
+
+    # Soft-deletes one of the authenticated customer's own pets by setting isActive to false
+    deletePet(petId: ID!): Pet!
   }
 `;
 

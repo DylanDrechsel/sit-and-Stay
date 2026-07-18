@@ -260,8 +260,12 @@ model Pet {
   vetClinic        String?
   vetPhone         String?
 
+  isActive         Boolean         @default(true)  // soft delete — false once removed by the customer
+
   customer         CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
   jobs             Job[]           @relation("JobPets")
+
+  @@index([customerId, isActive])
 }
 
 // ----------------------------------------------------------------------
