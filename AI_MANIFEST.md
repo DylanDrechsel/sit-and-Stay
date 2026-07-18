@@ -240,7 +240,7 @@ All IDs use `uuid()`. Models with timestamps have both `createdAt` and `updatedA
 | `BusinessRole`       | `OWNER`, `MANAGER`, `EMPLOYEE`                                      |
 | `PetType`            | `DOG`, `CAT`, `BIRD`, `RABBIT`, `REPTILE`, `OTHER`                  |
 | `DayOfWeek`          | `MONDAY` … `SUNDAY`                                                 |
-| `JobStatus`          | `PENDING`, `ACCEPTED`, `ASSIGNED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` |
+| `JobStatus`          | `PENDING`, `ACCEPTED`, `ASSIGNED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`, `DECLINED` |
 | `EntryType`          | `CREDIT`, `DEBIT`                                                   |
 | `LedgerReferenceType`| `JOB_PAYMENT`, `TIP`, `PAYOUT`, `REFUND`, `ADJUSTMENT`             |
 | `AuthProvider`       | `EMAIL`, `GOOGLE`, `APPLE` — how a `User` authenticates            |
@@ -484,6 +484,58 @@ An optional extra charge attached to a `ServiceOffering` (e.g., "Additional Dog"
 
 ---
 
+### Model: `Booking` → table `bookings`
+
+The customer's checkout order. Groups the `Job` rows created for a multi-session package purchase
+("4-walk pack" → 4 `Job` rows sharing one `Booking`) and holds the pack-level total shown at
+checkout ("$104 pack + $10 add-on + $6 fee = $120"). A single ad-hoc session is still a `Booking`
+with exactly one `Job` and `servicePackageId: null`.
+
+| Field               | Type     | Notes                                              |
+|---------------------|----------|-----------------------------------------------------|
+| `id`                | String   | uuid, primary key                                  |
+| `businessId`        | String   | FK → `businesses.id`                               |
+| `customerId`        | String   | FK → `customer_profiles.id`                        |
+| `serviceOfferingId` | String   | FK → `service_offerings.id`                        |
+| `servicePackageId`  | String?  | FK → `service_packages.id`, optional — null for a single ad-hoc session |
+| `totalPrice`        | Decimal  | precision `(10,2)`; full order total incl. add-ons and service fee |
+| `createdAt`         | DateTime | default now                                        |
+| `updatedAt`         | DateTime | auto-updated                                       |
+
+**Relations:**
+- `business` → `Business`
+- `customer` → `CustomerProfile`
+- `serviceOffering` → `ServiceOffering`
+- `servicePackage` → `ServicePackage?`
+- `jobs` → `Job[]` — one row per session
+- `addOns` → `BookingAddOn[]`
+
+**Indexes:** `businessId`, `customerId`
+
+> **GraphQL/resolver status:** not yet exposed anywhere in `typeDefs.ts` — no type, input, query,
+> or mutation references `Booking`. Booking creation and its downstream `Job` fan-out is not yet
+> implemented; follow §12 when building it.
+
+---
+
+### Model: `BookingAddOn` → table `booking_add_ons`
+
+An add-on selected at checkout. `priceAtBooking` snapshots the add-on's price at the moment of
+purchase so a later price change on the `ServiceOfferingAddOn` doesn't rewrite old receipts.
+
+| Field             | Type    | Notes                                              |
+|-------------------|---------|------------------------------------------------------|
+| `id`              | String  | uuid, primary key                                    |
+| `bookingId`       | String  | FK → `bookings.id`, cascade delete                   |
+| `addOnId`         | String  | FK → `service_offering_add_ons.id`                   |
+| `priceAtBooking`  | Decimal | precision `(10,2)`; price snapshot at purchase time  |
+
+`@@unique([bookingId, addOnId])` — an add-on can only be selected once per booking.
+
+> **GraphQL/resolver status:** not yet exposed anywhere in `typeDefs.ts`.
+
+---
+
 ### Model: `EmployeeAvailability` → table `employee_availabilities`
 
 Recurring weekly schedule for an employee. One record per day per employee (`@@unique([employeeId, dayOfWeek])`).
@@ -507,6 +559,7 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 |----------------------|---------------|--------------------------------------------|
 | `id`                 | String        | uuid, primary key                          |
 | `jobNumber`          | Int           | unique, autoincrement; human-readable "Job #1382" |
+| `bookingId`          | String?       | FK → `bookings.id`, optional — parent checkout order grouping a package's sessions |
 | `businessId`         | String        | FK → `businesses.id`                       |
 | `customerId`         | String        | FK → `customer_profiles.id`                |
 | `serviceOfferingId`  | String        | FK → `service_offerings.id`                |
@@ -520,15 +573,18 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 | `actualStartTime`    | DateTime?     | clock-in — set when job actually begins    |
 | `actualEndTime`      | DateTime?     | clock-out — set when job actually ends     |
 | `acceptedAt`         | DateTime?     | when the business accepted the request     |
+| `declinedAt`         | DateTime?     | when the business declined the request (pairs with `JobStatus.DECLINED`) |
 | `assignedAt`         | DateTime?     | when a sitter was assigned                 |
 | `distanceMeters`     | Int?          | route distance walked ("0.8 mi walked")    |
 | `specialInstructions`| String?       | optional customer notes                    |
+| `accessCode`         | String?       | **SENSITIVE** — per-job home access secret (e.g. lockbox code). Set by the customer per job, never stored on `Pet`. Resolvers must expose this only to the assigned sitter and an active OWNER/MANAGER of the job's business — never in public/list queries or logs |
 | `price`              | Decimal       | USD, precision `(10,2)`                    |
 | `tipAmount`          | Decimal?      | USD, precision `(10,2)`, set on completion |
 | `createdAt`          | DateTime      | default now (serves as the "Requested" timestamp) |
 | `updatedAt`          | DateTime      | auto-updated                               |
 
 **Relations:**
+- `booking` → `Booking?`
 - `business` → `Business`
 - `customer` → `CustomerProfile`
 - `service` → `ServiceOffering`
@@ -539,6 +595,8 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 - `conversation` → `Conversation?`
 - `updates` → `JobUpdate[]` — live photo/note feed during the job
 - `reportCard` → `ReportCard?` — single end-of-job summary
+
+**Indexes:** `bookingId`, `businessId`, `customerId`
 
 ---
 
@@ -622,20 +680,21 @@ Use Prisma `$transaction` with `isolationLevel: Serializable` when writing entri
 
 ### Model: `Conversation` → table `conversations`
 
-A conversation always belongs to a `Business` and has exactly **one** participant on the other side:
-- `customerId` set → **Owner ↔ Customer** conversation
-- `memberId` set → **Owner ↔ Employee** conversation
+A conversation always belongs to a `Business`. Exactly **three** shapes are allowed:
+- `customerId` set, `memberId` null → **Business ↔ Customer** conversation
+- `memberId` set, `customerId` null → **Business ↔ Employee** conversation
+- both `customerId` and `memberId` set → **group chat**: Business + Employee + Customer together
 
-Both `customerId` and `memberId` are optional at the DB level, but application logic must ensure
-exactly one is set when creating a conversation.
+Both fields are optional at the DB level, but application logic must ensure at least one of the
+three shapes above holds when creating a conversation (i.e. never both null).
 
 | Field       | Type    | Notes                                        |
 |-------------|---------|----------------------------------------------|
 | `id`        | String  | uuid, primary key                            |
 | `jobId`     | String? | FK → `jobs.id`, unique — optional job link   |
 | `businessId`| String  | FK → `businesses.id`                         |
-| `customerId`| String? | FK → `customer_profiles.id` — set for Owner↔Customer |
-| `memberId`  | String? | FK → `business_members.id` — set for Owner↔Employee  |
+| `customerId`| String? | FK → `customer_profiles.id` — set for Business↔Customer and group chats |
+| `memberId`  | String? | FK → `business_members.id` — set for Business↔Employee and group chats  |
 
 **Relations:**
 - `business` → `Business`
@@ -661,6 +720,26 @@ A single message within a `Conversation`. Uses cursor-based pagination — alway
 | `isRead`        | Boolean | default `false`                        |
 
 **Indexes:** `(conversationId, createdAt DESC)` — for O(1) cursor-based pagination
+
+---
+
+### Model: `Favorite` → table `favorites`
+
+A customer bookmarking a business ("tap to favorite" paw-fill interaction). One row per
+customer/business pair.
+
+| Field       | Type     | Notes                                |
+|-------------|----------|---------------------------------------|
+| `id`        | String   | uuid, primary key                    |
+| `customerId`| String   | FK → `customer_profiles.id`, cascade delete |
+| `businessId`| String   | FK → `businesses.id`, cascade delete |
+| `createdAt` | DateTime | default now                          |
+
+`@@unique([customerId, businessId])` — a customer can favorite a business only once.
+
+**Indexes:** `businessId`
+
+> **GraphQL/resolver status:** not yet exposed anywhere in `typeDefs.ts`.
 
 ---
 
@@ -827,6 +906,24 @@ The following handlers are implemented and registered through `resolvers/busines
 - Derive current balance from `findFirst({ orderBy: { createdAt: 'desc' } }).balanceAfter`
 - Wrap all payment operations in `prisma.$transaction({ isolationLevel: Serializable })` with retry logic
 
+### Planned, Not Yet Designed
+
+These are confirmed product directions with no schema or resolver work started — don't assume any
+of the following exists until this section is updated:
+
+- **Customer payments**: Stripe is the planned processor for charging customers (saved cards,
+  charge-on-acceptance, tips, refunds). No `PaymentMethod`/`Charge` model or Stripe integration
+  exists yet; `LedgerEntry` today only tracks business-side bookkeeping, not the customer payment
+  instrument itself.
+- **Business subscription billing**: a tiered plan system for businesses (see the `2g` "Billing &
+  payment" screen — Growth $89/mo, staff limits) is planned but undesigned; whether plan/tier data
+  lives in this schema or is delegated entirely to a billing provider (e.g. Stripe Billing) is not
+  yet decided.
+- **Sitter payouts**: earnings are calculated **per completed job** (a sitter's cut of that job's
+  price), not a flat percentage or salary. There is no payout model yet — `LedgerEntry` is
+  business-scoped only, with no `BusinessMember`-scoped equivalent. Design the payout ledger when
+  this is built, following the same append-only philosophy as `LedgerEntry`.
+
 ---
 
 ## 12. Adding New Features — Conventions
@@ -868,9 +965,6 @@ docker compose up -d
 
 # Stop the database
 docker compose down
-
-# Backend commands (run from the repository root)
-cd backend
 
 # Start dev server (auto-reloads)
 npm run dev

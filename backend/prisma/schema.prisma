@@ -49,6 +49,7 @@ enum JobStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+  DECLINED // business declined the request (owner Requests inbox "Declined" tab)
 }
 
 enum EntryType {
@@ -105,6 +106,12 @@ enum PetMood {
   LOW_ENERGY
 }
 
+// Purpose of a stored WebAuthn ceremony challenge (admin passkey MFA)
+enum WebAuthnChallengeType {
+  REGISTRATION
+  AUTHENTICATION
+}
+
 // ----------------------------------------------------------------------
 // CORE IDENTITY & MULTI-TENANCY
 // ----------------------------------------------------------------------
@@ -126,6 +133,9 @@ model User {
   customer      CustomerProfile?
   messages      Message[]
   jobUpdates    JobUpdate[]
+  adminAuditLogs AdminAuditLog[]         @relation("AdminAuditActor")
+  adminCredentials AdminCredential[]     @relation("AdminCredentials")
+  adminChallenges  AdminWebAuthnChallenge[] @relation("AdminChallenges")
 }
 
 model Business {
@@ -156,11 +166,13 @@ model Business {
 
   members       BusinessMember[]
   offerings     ServiceOffering[]
+  bookings      Booking[]
   jobs          Job[]
   ledgerEntries LedgerEntry[]
   reviews       Review[]
   invitations   Invitation[]
   conversations Conversation[]
+  favoritedBy   Favorite[]
 
   @@index([isActive])
   @@index([location], name: "business_location_idx", type: Gist)
@@ -218,9 +230,11 @@ model CustomerProfile {
 
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   pets          Pet[]
+  bookings      Booking[]
   jobs          Job[]
   reviews       Review[]
   conversations Conversation[]
+  favorites     Favorite[]
 
   @@index([location], name: "customer_location_idx", type: Gist)
 }
@@ -269,7 +283,8 @@ model ServiceOffering {
   packages        ServicePackage[]
   addOns          ServiceOfferingAddOn[]
 
-  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings        Booking[]
   jobs            Job[]
 }
 
@@ -282,6 +297,7 @@ model ServicePackage {
   isActive          Boolean         @default(true)
 
   serviceOffering   ServiceOffering @relation(fields: [serviceOfferingId], references: [id], onDelete: Cascade)
+  bookings          Booking[]
 }
 
 model ServiceOfferingAddOn {
@@ -293,6 +309,51 @@ model ServiceOfferingAddOn {
   isActive          Boolean         @default(true)
 
   serviceOffering   ServiceOffering @relation(fields: [serviceOfferingId], references: [id], onDelete: Cascade)
+  bookingAddOns     BookingAddOn[]
+}
+
+// ----------------------------------------------------------------------
+// BOOKINGS
+// ----------------------------------------------------------------------
+// A Booking is the customer's checkout order: it groups the Jobs created for a
+// multi-session package ("4-walk pack" → 4 Job rows), records which package and
+// add-ons were purchased, and holds the pack-level total shown at checkout
+// ("$104 pack + $10 add-on + $6 fee = $120"). A single ad-hoc session is still
+// a Booking with one Job and no servicePackageId.
+
+model Booking {
+  id                String          @id @default(uuid())
+  businessId        String
+  customerId        String
+  serviceOfferingId String
+  servicePackageId  String?                             // package purchased; null for a single ad-hoc session
+  totalPrice        Decimal         @db.Decimal(10, 2)  // full order total shown at checkout, incl. add-ons & service fee
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  business          Business        @relation(fields: [businessId], references: [id])
+  customer          CustomerProfile @relation(fields: [customerId], references: [id])
+  serviceOffering   ServiceOffering @relation(fields: [serviceOfferingId], references: [id])
+  servicePackage    ServicePackage? @relation(fields: [servicePackageId], references: [id])
+  jobs              Job[]
+  addOns            BookingAddOn[]
+
+  @@index([businessId])
+  @@index([customerId])
+}
+
+// Add-on selected at checkout, with the price snapshotted at booking time so
+// later price changes on the ServiceOfferingAddOn don't rewrite old receipts.
+model BookingAddOn {
+  id             String               @id @default(uuid())
+  bookingId      String
+  addOnId        String
+  priceAtBooking Decimal              @db.Decimal(10, 2)
+
+  booking        Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  addOn          ServiceOfferingAddOn @relation(fields: [addOnId], references: [id])
+
+  @@unique([bookingId, addOnId])
 }
 
 model EmployeeAvailability {
@@ -311,6 +372,7 @@ model EmployeeAvailability {
 model Job {
   id                  String          @id @default(uuid())
   jobNumber           Int             @unique @default(autoincrement())  // human-readable "Job #1382"
+  bookingId           String?         // parent checkout order; groups the sessions of a package
   businessId          String
   customerId          String
   serviceOfferingId   String
@@ -328,9 +390,15 @@ model Job {
   actualStartTime     DateTime?       // clock-in
   actualEndTime       DateTime?       // clock-out
   acceptedAt          DateTime?       // business accepted the request
+  declinedAt          DateTime?       // business declined the request
   assignedAt          DateTime?       // a sitter was assigned
   distanceMeters      Int?            // route distance walked during the job ("0.8 mi walked so far")
   specialInstructions String?
+
+  // SENSITIVE — per-job home access secret (e.g. lockbox code "4821"). Set by the
+  // customer per job, never stored on the Pet. Expose only to the assigned sitter
+  // and the business's active OWNER/MANAGER; never in public/list queries or logs.
+  accessCode          String?
 
   price               Decimal         @db.Decimal(10, 2)
   tipAmount           Decimal?        @db.Decimal(10, 2)
@@ -338,6 +406,7 @@ model Job {
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
+  booking             Booking?        @relation(fields: [bookingId], references: [id])
   business            Business        @relation(fields: [businessId], references: [id])
   customer            CustomerProfile @relation(fields: [customerId], references: [id])
   service             ServiceOffering @relation(fields: [serviceOfferingId], references: [id])
@@ -349,6 +418,7 @@ model Job {
   updates             JobUpdate[]
   reportCard          ReportCard?
 
+  @@index([bookingId])
   @@index([businessId])
   @@index([customerId])
 }
@@ -433,18 +503,19 @@ model LedgerEntry {
 // ----------------------------------------------------------------------
 // MESSAGING & COMMUNICATIONS
 // ----------------------------------------------------------------------
-// A Conversation is always anchored to a Business and has exactly ONE
-// of the following participants on the other side:
-//   - customerId set  → Owner ↔ Customer conversation
-//   - memberId set    → Owner ↔ Employee (BusinessMember) conversation
+// A Conversation is always anchored to a Business. Exactly three shapes are
+// allowed (application logic must enforce that at least one side is set):
+//   - customerId set             → Business ↔ Customer conversation
+//   - memberId set               → Business ↔ Employee (BusinessMember) conversation
+//   - customerId + memberId set  → group chat: Business + Employee + Customer
 // The jobId is optional and links a conversation to a specific job.
 
 model Conversation {
   id         String           @id @default(uuid())
   jobId      String?          @unique  // optionally linked to a job
   businessId String
-  customerId String?          // set for Owner ↔ Customer
-  memberId   String?          // set for Owner ↔ Employee
+  customerId String?          // set for Business ↔ Customer and for group chats
+  memberId   String?          // set for Business ↔ Employee and for group chats
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
 
@@ -472,4 +543,80 @@ model Message {
 
   // Composite index for rapid cursor-based pagination
   @@index([conversationId, createdAt(sort: Desc)])
+}
+
+// ----------------------------------------------------------------------
+// FAVORITES
+// ----------------------------------------------------------------------
+// A customer bookmarking a business ("tap to favorite" paw fill). One row per
+// customer/business pair.
+
+model Favorite {
+  id         String          @id @default(uuid())
+  customerId String
+  businessId String
+  createdAt  DateTime        @default(now())
+
+  customer   CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  business   Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, businessId])
+  @@index([businessId])
+}
+
+// ----------------------------------------------------------------------
+// PLATFORM ADMINISTRATION ----------------> NOT USED YET
+// ----------------------------------------------------------------------
+// Append-only audit trail of every privileged action taken through the admin
+// API. Same philosophy as the financial ledger: rows are never updated or
+// deleted — a mistaken action is corrected by recording a new, compensating one.
+// Every admin mutation MUST write exactly one row here before returning.
+
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  actorId    String                 // User (globalRole ADMIN) who performed the action
+  action     String                 // namespaced action key, e.g. "business.deactivate", "user.setGlobalRole"
+  targetType String?                // entity acted upon, e.g. "Business", "User"
+  targetId   String?                // id of that entity
+  metadata   Json?                  // structured context (before/after values, reason, etc.)
+  ipAddress  String?                // request source IP, when available
+  createdAt  DateTime @default(now())
+
+  actor      User     @relation("AdminAuditActor", fields: [actorId], references: [id])
+
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([targetType, targetId])
+}
+
+// A registered WebAuthn passkey used as the admin second factor. An admin may
+// register multiple (e.g. a laptop platform key + a hardware security key).
+model AdminCredential {
+  id           String    @id @default(uuid())
+  userId       String
+  credentialId String    @unique          // base64url credential ID from the authenticator
+  publicKey    Bytes                       // COSE public key bytes
+  counter      Int       @default(0)       // signature counter for clone/replay detection
+  transports   String[]                    // e.g. ["internal", "hybrid", "usb"]
+  deviceLabel  String?                     // user-friendly name, e.g. "MacBook Touch ID"
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  user         User      @relation("AdminCredentials", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Short-lived server-issued WebAuthn challenge, stored so it can be verified on the
+// follow-up request. Consumed (deleted) on verification; expired rows are ignored.
+model AdminWebAuthnChallenge {
+  id        String                @id @default(uuid())
+  userId    String
+  challenge String                                    // base64url challenge string
+  type      WebAuthnChallengeType
+  expiresAt DateTime
+  createdAt DateTime              @default(now())
+
+  user      User                  @relation("AdminChallenges", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
 }

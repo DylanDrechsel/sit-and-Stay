@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n -o -E '<title>[^<]*</title>|<h[12][^>]*>[^<]{0,80}' first_draft_screens.html)",
+      "Bash(awk '{ if \\(length\\($0\\) > 300\\) print NR\": [LONG LINE, \"length\\($0\\)\" chars]\"; else print NR\": \"$0 }' first_draft_screens.html)",
+      "Bash(git -C \"C:/Users/Drech/Documents/computer_science/projects/pet_sitter\" diff --stat backend/prisma/schema.prisma)",
+      "Bash(git -C \"C:/Users/Drech/Documents/computer_science/projects/pet_sitter\" diff backend/prisma/schema.prisma)",
+      "Bash(npx prisma *)",
+      "Bash(npm --version)",
+      "Bash(ls -t \"/mnt/c/Users/Drech/Documents/computer_science/projects/pet_sitter/backend/prisma/migrations/\" | head -5)"
+    ]
+  }
+}
