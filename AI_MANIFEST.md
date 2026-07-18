@@ -56,6 +56,7 @@ pet_sitter_pro/
     │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput
     │   │   ├── context.ts         # GraphQLContext interface
     │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput, InvitationEmailPayload
+    │   │   ├── pet.ts             # AddPetInput, UpdatePetInput
     │   │   ├── registration.ts    # RegisterCustomerInput, RegisterOwnerInput
     │   │   └── user.ts            # UpdateUserInput, ChangePasswordInput, ChangeEmailInput
     │   ├── utils/
@@ -74,8 +75,13 @@ pet_sitter_pro/
     │           │       └── registerOwner.ts
     │           ├── customer/
     │           │   ├── customerResolvers.ts
+    │           │   ├── queries/
+    │           │   │   └── getMyPets.ts
     │           │   └── mutations/
-    │           │       └── registerCustomer.ts
+    │           │       ├── registerCustomer.ts
+    │           │       ├── addPet.ts
+    │           │       ├── updatePet.ts
+    │           │       └── deletePet.ts
     │           ├── invitation/
     │           │   ├── invitationResolvers.ts
     │           │   └── mutations/
@@ -406,10 +412,13 @@ A pet belonging to a customer.
 | `vetName`         | String?        | optional; shared with assigned sitter |
 | `vetClinic`       | String?        | optional                       |
 | `vetPhone`        | String?        | optional                       |
+| `isActive`        | Boolean        | default `true`; **soft-delete flag** — set to `false` by `deletePet`; active pets only are returned by `getMyPets` |
 
 **Relations:**
 - `customer` → `CustomerProfile`
 - `jobs` → `Job[]` (via `JobPets` many-to-many relation)
+
+**Indexes:** `(customerId, isActive)` — scopes all pet reads to the owner and filters out soft-deleted pets efficiently
 
 ---
 
@@ -765,8 +774,8 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` are expected to stay
 in lockstep, but **currently do not** for the service domain. The root resolver map explicitly
-spreads the user and business query and mutation barrels, so the declared user/business operations
-below are callable. `registerOwner` is registered only as a mutation.
+spreads the user, business, and customer query and mutation barrels, so all declared
+user/business/customer operations below are callable. `registerOwner` is registered only as a mutation.
 
 > **Known gap:** `typeDefs.ts` declares a full CRUD surface for `ServiceOffering` and
 > `ServiceOfferingAddOn` (5 queries/mutations each — see the tables below) and `validate.ts` has
@@ -785,6 +794,7 @@ below are callable. `registerOwner` is registered only as a mutation.
 | `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` — returns active memberships only |
 | `getBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getBusinessMembers.ts` |
 | `getInactiveBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getInactiveBusinessMembers.ts` |
+| `getMyPets`   | none            | `[Pet!]!`          | Yes (JWT)     | `resolvers/customer/queries/getMyPets.ts` — returns only `isActive: true` pets scoped to the caller's `CustomerProfile` |
 | `getServiceOffering` ⚠️ | `serviceOfferingId: ID!` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists. Calling this will error/no-op.** |
 | `getServiceOfferings` ⚠️ | `businessId: ID!` | `[ServiceOffering!]!` | — | **Declared in SDL only — no resolver file exists.** |
 | `getServiceAddOn` ⚠️ | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | — | **Declared in SDL only — no resolver file exists.** |
@@ -806,6 +816,9 @@ below are callable. `registerOwner` is registered only as a mutation.
 | `updateBusiness`    | `UpdateBusinessInput`    | `Business!`        | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/updateBusiness.ts` |
 | `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (active OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
 | `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` — sets `isActive` to `false`; does not delete the row |
+| `addPet`            | `AddPetInput`            | `Pet!`             | Yes (JWT + CustomerProfile) | `resolvers/customer/mutations/addPet.ts` — resolves the caller's `CustomerProfile` from the JWT, then creates the pet scoped to that `customerId` |
+| `updatePet`         | `UpdatePetInput`         | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/updatePet.ts` — returns 404 (NOT_FOUND) rather than FORBIDDEN if the `petId` belongs to another customer, to avoid confirming a pet ID exists cross-account |
+| `deletePet`         | `petId: ID!`             | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/deletePet.ts` — same 404-on-mismatch pattern as `updatePet`; sets `isActive` to `false` (soft delete), does not destroy the row |
 | `createServiceOffering` ⚠️ | `CreateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
 | `updateServiceOffering` ⚠️ | `UpdateServiceOfferingInput` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
 | `deleteServiceOffering` ⚠️ | `serviceOfferingId: ID!` | `ServiceOffering!` | — | **Declared in SDL only — no resolver file exists.** |
@@ -827,6 +840,8 @@ below are callable. `registerOwner` is registered only as a mutation.
 | `ChangeEmailInput` | `newEmail`, `password` | Confirms the password and normalizes the new email to lowercase. |
 | `UpdateBusinessInput` | `businessId`, `name?`, `description?` | Requires a UUID business ID and at least one update field. Empty `description` clears the stored value. |
 | `RemoveMemberInput` | `businessId`, `memberId` | Both IDs must be UUIDs; `memberId` identifies a `BusinessMember`, not a `User`. |
+| `AddPetInput` | `name`, `type`, all other `Pet` fields optional | Zod schema (`addPetSchema`) in `validate.ts`. `name` and `type` (must be a valid `PetType` enum value) are required. All other fields are optional. |
+| `UpdatePetInput` | `petId`, all other fields optional | Zod schema (`updatePetSchema`) in `validate.ts`. Partial update — only provided fields are written. An empty string on a clearable text field (`breed`, `medicalNotes`, etc.) clears it to `null`. `age`, `sex`, and `weightLb` accept explicit `null` to clear the value. |
 | `CreateServiceOfferingInput` | `businessId`, `title`, `description`, `durationMinutes` | Zod schema (`createServiceOfferingSchema`) exists in `validate.ts`; no resolver consumes it yet. |
 | `UpdateServiceOfferingInput` | `serviceOfferingId`, `title?`, `description?`, `durationMinutes?`, `isActive?` | Zod schema (`updateServiceOfferingSchema`) requires a UUID id and at least one other field; no resolver consumes it yet. |
 | `CreateServiceAddOnInput` | `serviceOfferingId`, `title`, `pricePerSession`, `perSession?` | Zod schema (`createServiceAddOnSchema`) requires a positive price with ≤2 decimal places; no resolver consumes it yet. |
@@ -842,6 +857,7 @@ below are callable. `registerOwner` is registered only as a mutation.
 | `OwnerAuthPayload` | `token: String!, user: User!, business: Business!` | Returned by `registerOwner`       |
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
 | `BusinessMember`   | `id, role, isActive, joinedAt, user: User!` | Returned by `getBusinessMembers`, `removeMember` |
+| `Pet`              | All `Pet` model fields including `isActive` | Returned by `getMyPets`, `addPet`, `updatePet`, `deletePet`. `weightLb` is `Float?`; the underlying Prisma `Decimal` must be converted with `Number()` in resolvers before returning. |
 | `ServiceOffering`  | `id, businessId, title, description, durationMinutes, isActive, addOns: [ServiceOfferingAddOn!]!` | Declared in SDL only — no resolver returns this type yet. Does not expose `packages` (the `ServicePackage[]` relation is not in the GraphQL schema at all). |
 | `ServiceOfferingAddOn` | `id, serviceOfferingId, title, pricePerSession, perSession, isActive` | Declared in SDL only — no resolver returns this type yet. `pricePerSession` is `Float!`; the underlying Prisma field is `Decimal` and will need explicit `Number()` conversion in whatever resolver is written, since Decimal instances aren't natively serializable as a GraphQL Float. |
 
@@ -868,6 +884,15 @@ The following handlers are implemented and registered through `resolvers/busines
 - `updateBusiness` permits only an active OWNER or MANAGER of the target business. It applies a partial update and treats an empty description as `null`.
 - `deactivateBusiness` is active-OWNER-only, rejects unknown or already inactive businesses, and performs a soft delete by setting `isActive` to `false`.
 - `removeMember` permits active OWNERs to remove MANAGERs or EMPLOYEEs and active MANAGERs to remove EMPLOYEEs only. It rejects self-removal, removal of the OWNER, already inactive members, and members from another business. It retains the row and sets its `isActive` flag to `false`.
+
+### Customer Resolver Behavior
+
+The following handlers are implemented and registered through `resolvers/customer/`. All four resolvers first resolve the caller's `CustomerProfile` from the JWT `userId` and throw `UNAUTHENTICATED` if no profile exists.
+
+- `getMyPets` returns all pets where `customerId` matches the caller's profile **and** `isActive` is `true`, ordered by `createdAt` ascending.
+- `addPet` creates a new `Pet` row scoped to the caller's `customerId`. `name` and `type` are required; all other fields are optional.
+- `updatePet` applies a partial update. Empty strings on clearable text fields (`breed`, `medicalNotes`, etc.) are coerced to `null`. Explicit `null` on `age`, `sex`, or `weightLb` clears those fields. Returns `NOT_FOUND` (not `FORBIDDEN`) when the `petId` does not belong to the caller — this deliberately avoids confirming whether a pet ID exists on another account.
+- `deletePet` soft-deletes the pet by setting `isActive` to `false`. Same `NOT_FOUND`-on-mismatch security pattern as `updatePet`. The row is preserved for historical job references.
 
 ### Scalar Types
 

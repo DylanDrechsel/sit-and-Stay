@@ -240,6 +240,73 @@ export const updateServiceAddOnSchema = z.object({
     { message: 'At least one field must be provided to update' },
 );
 
+// ── Pet schemas ─────────────────────────────────────────────────────────────
+
+// Reusable field — pet operations require a valid Pet.id
+const petIdField = z.string().uuid('Invalid pet ID');
+
+const petTypeField = z.enum(['DOG', 'CAT', 'BIRD', 'RABBIT', 'REPTILE', 'OTHER'], {
+    errorMap: () => ({ message: 'Type must be one of DOG, CAT, BIRD, RABBIT, REPTILE, OTHER' }),
+});
+const petSexField = z.enum(['MALE', 'FEMALE'], {
+    errorMap: () => ({ message: 'Sex must be MALE or FEMALE' }),
+});
+// Accepts a full absolute URL (e.g., https://...) or a local relative path (e.g., /uploads/...)
+const photoUrlField = z.string().trim().refine(
+    (val) => val.startsWith('/') || z.string().url().safeParse(val).success,
+    { message: 'Invalid photo URL or path' },
+);
+
+/**
+ * Validates input for adding a pet to the authenticated customer's profile.
+ * name and type are required; everything else is optional.
+ */
+export const addPetSchema = z.object({
+    name: z.string().trim().min(1, 'Pet name is required').max(50, 'Pet name too long'),
+    type: petTypeField,
+    breed: z.string().trim().max(100, 'Breed too long').optional(),
+    age: z.number().int('Age must be a whole number').nonnegative('Age cannot be negative').optional(),
+    sex: petSexField.optional(),
+    weightLb: z.number().positive('Weight must be greater than 0').optional(),
+    photoUrl: photoUrlField.optional(),
+    isNeutered: z.boolean().optional(),
+    isMicrochipped: z.boolean().optional(),
+    medicalNotes: z.string().trim().max(2000, 'Medical notes too long').optional(),
+    careInstructions: z.string().trim().max(2000, 'Care instructions too long').optional(),
+    homeAccessNotes: z.string().trim().max(1000, 'Home access notes too long').optional(),
+    vetName: z.string().trim().max(100, 'Vet name too long').optional(),
+    vetClinic: z.string().trim().max(100, 'Vet clinic too long').optional(),
+    vetPhone: phoneField.optional(),
+});
+
+/**
+ * Validates input for updating one of the authenticated customer's own pets.
+ * petId is required; all other fields are optional (partial update).
+ * Passing an empty string for a clearable text field sets it to null.
+ * At least one field besides petId must be provided (enforced by object-level .refine()).
+ */
+export const updatePetSchema = z.object({
+    petId: petIdField,
+    name: z.string().trim().min(1, 'Pet name cannot be empty').max(50, 'Pet name too long').optional(),
+    type: petTypeField.optional(),
+    breed: z.union([z.string().trim().max(100, 'Breed too long'), z.literal(''), z.null()]).optional(),
+    age: z.union([z.number().int('Age must be a whole number').nonnegative('Age cannot be negative'), z.null()]).optional(),
+    sex: z.union([petSexField, z.null()]).optional(),
+    weightLb: z.union([z.number().positive('Weight must be greater than 0'), z.null()]).optional(),
+    photoUrl: z.union([photoUrlField, z.literal(''), z.null()]).optional(),
+    isNeutered: z.boolean().optional(),
+    isMicrochipped: z.boolean().optional(),
+    medicalNotes: z.union([z.string().trim().max(2000, 'Medical notes too long'), z.literal(''), z.null()]).optional(),
+    careInstructions: z.union([z.string().trim().max(2000, 'Care instructions too long'), z.literal(''), z.null()]).optional(),
+    homeAccessNotes: z.union([z.string().trim().max(1000, 'Home access notes too long'), z.literal(''), z.null()]).optional(),
+    vetName: z.union([z.string().trim().max(100, 'Vet name too long'), z.literal(''), z.null()]).optional(),
+    vetClinic: z.union([z.string().trim().max(100, 'Vet clinic too long'), z.literal(''), z.null()]).optional(),
+    vetPhone: z.union([phoneField, z.literal(''), z.null()]).optional(),
+}).refine(
+    (data) => Object.keys(data).some((key) => key !== 'petId' && (data as Record<string, unknown>)[key] !== undefined),
+    { message: 'At least one field must be provided to update' },
+);
+
 // ── Helper ─────────────────────────────────────────────────────────────────
 
 /**
