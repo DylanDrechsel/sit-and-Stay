@@ -30,5 +30,6 @@ export default {
     Job: jobResolvers.Job,
     Booking: jobResolvers.Booking,
     BookingAddOn: jobResolvers.BookingAddOn,
+    Business: businessResolvers.Business,
     JSON: GraphQLJSON,
 };

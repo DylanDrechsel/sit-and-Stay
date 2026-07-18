@@ -19,7 +19,23 @@ const typeDefs = `#graphql
     name: String!
     description: String
     isActive: Boolean!
+    isVerified: Boolean!
+    heroPhotoUrl: String
+    addressLine: String
+    city: String
+    neighborhood: String
+    serviceFeeAmount: Float
+    avgRating: Float
+    reviewCount: Int!
     createdAt: String!
+  }
+
+  # One business in a getNearbyBusinesses result, with the computed distance
+  # from the search point and its headline "from $X" price
+  type NearbyBusiness {
+    business: Business!
+    distanceMiles: Float!
+    fromPrice: Float
   }
 
   # Returned after registerCustomer, login, and acceptInvitation
@@ -267,6 +283,12 @@ const typeDefs = `#graphql
     memberId: ID!
   }
 
+  input SetBusinessLocationInput {
+    businessId: ID!
+    latitude: Float!
+    longitude: Float!
+  }
+
   # ── Service inputs ————————————————————————————————
 
   input CreateServiceOfferingInput {
@@ -422,6 +444,19 @@ const typeDefs = `#graphql
     # Returns all inactive members of a business with their user profiles (requires JWT + active membership)
     getInactiveBusinessMembers(businessId: ID!): [BusinessMember!]!
 
+    # Finds active businesses within radiusMiles of the given point, nearest first (no auth required).
+    # category filters to businesses with at least one active ServiceOffering in that category;
+    # search does a simple case-insensitive match against the business name.
+    # radiusMiles defaults to 25 (max 100); limit defaults to 20 (max 50).
+    getNearbyBusinesses(
+      latitude: Float!
+      longitude: Float!
+      radiusMiles: Float
+      category: String
+      search: String
+      limit: Int
+    ): [NearbyBusiness!]!
+
     # Returns a single service offering with its add-ons (requires JWT + active business membership)
     getServiceOffering(serviceOfferingId: ID!): ServiceOffering!
 
@@ -483,6 +518,10 @@ const typeDefs = `#graphql
 
     # Updates a business's name and/or description (OWNER or MANAGER only)
     updateBusiness(input: UpdateBusinessInput!): Business!
+
+    # Sets a business's PostGIS location — required for it to appear in getNearbyBusinesses
+    # (OWNER or MANAGER only)
+    setBusinessLocation(input: SetBusinessLocationInput!): Business!
 
     # Soft-deletes a business by setting isActive to false (OWNER only)
     deactivateBusiness(businessId: ID!): Business!
