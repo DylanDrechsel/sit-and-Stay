@@ -54,7 +54,7 @@ pet_sitter_pro/
     │   ├── types/                 # Shared TypeScript interfaces
     │   │   ├── auth.ts            # LoginInput
     │   │   ├── booking.ts         # CreateBookingInput, BookingSessionInput, AssignSitterInput
-    │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput
+    │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput, GetNearbyBusinessesInput, SetBusinessLocationInput, BusinessParent
     │   │   ├── context.ts         # GraphQLContext interface
     │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput, InvitationEmailPayload
     │   │   ├── jobActivity.ts     # PostJobUpdateInput, SubmitReportCardInput
@@ -115,13 +115,16 @@ pet_sitter_pro/
     │           │       ├── changePassword.ts
     │           │       └── updateUser.ts
     │           ├── business/
-    │           │   ├── businessResolvers.ts
+    │           │   ├── businessResolvers.ts   # also exports a Business type-level field map
     │           │   ├── queries/
     │           │   │   ├── getBusinessMembers.ts
-    │           │   │   └── getMyBusinesses.ts
+    │           │   │   ├── getInactiveBusinessMembers.ts
+    │           │   │   ├── getMyBusinesses.ts
+    │           │   │   └── getNearbyBusinesses.ts   # PostGIS $queryRaw
     │           │   └── mutations/
     │           │       ├── deactivateBusiness.ts
     │           │       ├── removeMember.ts
+    │           │       ├── setBusinessLocation.ts   # $executeRaw — Prisma can't write Unsupported columns
     │           │       └── updateBusiness.ts
     │           ├── review/
     │           │   ├── reviewResolvers.ts
@@ -307,7 +310,18 @@ The global identity record for any person on the platform (customer or business 
 
 ---
 
-### Model: `Business` → table `businesses`
+### Model: `Business` → table `"Business"`
+
+> **Correction:** this section previously said `→ table businesses` (snake_case, pluralized). No
+> `@@map`/`@map` directives exist anywhere in `schema.prisma`, so Prisma uses the model name as-is
+> for every table and column — verified directly against `migration.sql`
+> (`CREATE TABLE "Business" (...)`, with columns like `"isActive"`, `"heroPhotoUrl"`, not snake_case).
+> This was discovered while writing `getNearbyBusinesses`' raw SQL (§10) — getting the table name
+> wrong there wouldn't have been a docs nit, it would have been a broken query. Only this model's
+> header is fixed here; every other `### Model:` heading in this section likely has the same
+> `→ table snake_case_name` inaccuracy and hasn't been individually re-verified — don't trust those
+> headings for table/column names in raw SQL. Verify against `migration.sql` or a running
+> `\d "TableName"` instead.
 
 A pet sitting business (the tenant in the multi-tenant model).
 
@@ -344,6 +358,25 @@ A pet sitting business (the tenant in the multi-tenant model).
 - `conversations` → `Conversation[]`
 
 **Indexes:** `isActive`, `location` (GiST for PostGIS)
+
+> **GraphQL/resolver status:** the `Business` GraphQL type exposes every scalar field above except
+> `location` (there's no natural GraphQL scalar for a PostGIS geometry, and clients get a computed
+> `distanceMiles` instead — see `getNearbyBusinesses` in §10). `avgRating`/`serviceFeeAmount` go
+> through a type-level `Business` field resolver (`resolvers/business/businessResolvers.ts`) for
+> Decimal→Number conversion — shared across every Business-returning operation, not just
+> `getNearbyBusinesses`, since `getMyBusinesses`/`updateBusiness`/`deactivateBusiness`/`registerOwner`
+> all return this same type. Until this feature, the `Business` GraphQL type only exposed
+> `id, name, description, isActive, createdAt` — the rest of this table (`isVerified`,
+> `heroPhotoUrl`, `addressLine`, `city`, `neighborhood`, `serviceFeeAmount`, `avgRating`,
+> `reviewCount`) was added specifically because the discovery UI needs them.
+>
+> **`location` itself is write-only via `setBusinessLocation`** (`resolvers/business/mutations/
+> setBusinessLocation.ts`), the only mutation in the app that touches this column. Nothing else
+> ever sets it — not `registerOwner`, not `updateBusiness` — so a business created through normal
+> signup starts with `location: NULL` and is invisible to `getNearbyBusinesses` until this mutation
+> is called. There's no geocoding integration (an address like `addressLine`/`city` is never turned
+> into a `location` automatically); the caller must supply raw lat/lng. See `Business Resolver
+> Behavior` below for why this had to be `$executeRaw` rather than a normal Prisma `update()`.
 
 ---
 
@@ -849,10 +882,11 @@ spreads the user, business, customer, job, and review query and mutation barrels
 user/business/customer/job/review operations below are callable. `registerOwner` is registered only
 as a mutation. The `job` domain exports exactly one query (`getAvailableEmployees`) — there is
 still no way to list/look up jobs or bookings themselves through GraphQL; every job mutation other
-than `createBooking` takes an ID supplied by the caller. The `job` domain also registers
-**type-level** field resolvers (`Job`, `Booking`,
-`BookingAddOn`) spread directly onto the root resolver map alongside `Query`/`Mutation`/`JSON` —
-these back computed/gated fields (see `Job Resolver Behavior` below), not root operations.
+than `createBooking` takes an ID supplied by the caller. The `job` and `business` domains also
+register **type-level** field resolvers (`Job`, `Booking`, `BookingAddOn`, and now `Business`)
+spread directly onto the root resolver map alongside `Query`/`Mutation`/`JSON` — these back
+computed/gated fields (see `Job Resolver Behavior` and `Business Resolver Behavior` below), not
+root operations.
 
 > **Known gap:** `typeDefs.ts` declares a full CRUD surface for `ServiceOffering` and
 > `ServiceOfferingAddOn` (5 queries/mutations each — see the tables below) and `validate.ts` has
@@ -871,6 +905,7 @@ these back computed/gated fields (see `Job Resolver Behavior` below), not root o
 | `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` — returns active memberships only |
 | `getBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getBusinessMembers.ts` |
 | `getInactiveBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getInactiveBusinessMembers.ts` |
+| `getNearbyBusinesses` | `latitude: Float!, longitude: Float!, radiusMiles: Float, category: String, search: String, limit: Int` | `[NearbyBusiness!]!` | No | `resolvers/business/queries/getNearbyBusinesses.ts` — PostGIS `$queryRaw`; see `Business Resolver Behavior` below |
 | `getMyPets`   | none            | `[Pet!]!`          | Yes (JWT)     | `resolvers/customer/queries/getMyPets.ts` — returns only `isActive: true` pets scoped to the caller's `CustomerProfile` |
 | `getBusinessReviews` | `businessId: ID!` | `[Review!]!` | No | `resolvers/review/queries/getBusinessReviews.ts` — public-profile data; returns only `isPublic: true` reviews, ordered by `createdAt` descending |
 | `getAvailableEmployees` | `jobId: ID!` | `[EmployeeAvailabilityStatus!]!` | Yes (active OWNER/MANAGER) | `resolvers/job/queries/getAvailableEmployees.ts` — job's first query; see `Job Resolver Behavior` below for the availability + conflict-check algorithm |
@@ -893,6 +928,7 @@ these back computed/gated fields (see `Job Resolver Behavior` below), not root o
 | `changePassword`    | `ChangePasswordInput`    | `User!`            | Yes (JWT)     | `resolvers/user/mutations/changePassword.ts` — verifies current password; rejects if new == current |
 | `changeEmail`       | `ChangeEmailInput`       | `User!`            | Yes (JWT)     | `resolvers/user/mutations/changeEmail.ts` — confirms identity via password; checks uniqueness; normalizes to lowercase |
 | `updateBusiness`    | `UpdateBusinessInput`    | `Business!`        | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/updateBusiness.ts` |
+| `setBusinessLocation` | `SetBusinessLocationInput` | `Business!`   | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/setBusinessLocation.ts` — the only mutation that writes `Business.location`; uses `$executeRaw` since Prisma can't write `Unsupported` columns via `update()` |
 | `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (active OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
 | `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` — sets `isActive` to `false`; does not delete the row |
 | `addPet`            | `AddPetInput`            | `Pet!`             | Yes (JWT + CustomerProfile) | `resolvers/customer/mutations/addPet.ts` — resolves the caller's `CustomerProfile` from the JWT, then creates the pet scoped to that `customerId` |
@@ -928,6 +964,7 @@ these back computed/gated fields (see `Job Resolver Behavior` below), not root o
 | `ChangePasswordInput` | `currentPassword`, `newPassword` | New password must meet the registration password rules and differ from the current one. |
 | `ChangeEmailInput` | `newEmail`, `password` | Confirms the password and normalizes the new email to lowercase. |
 | `UpdateBusinessInput` | `businessId`, `name?`, `description?` | Requires a UUID business ID and at least one update field. Empty `description` clears the stored value. |
+| `SetBusinessLocationInput` | `businessId`, `latitude`, `longitude` | Zod schema (`setBusinessLocationSchema`) reuses the same lat/lng bounds as `getNearbyBusinessesSchema`. |
 | `RemoveMemberInput` | `businessId`, `memberId` | Both IDs must be UUIDs; `memberId` identifies a `BusinessMember`, not a `User`. |
 | `AddPetInput` | `name`, `type`, all other `Pet` fields optional | Zod schema (`addPetSchema`) in `validate.ts`. `name` and `type` (must be a valid `PetType` enum value) are required. All other fields are optional. |
 | `UpdatePetInput` | `petId`, all other fields optional | Zod schema (`updatePetSchema`) in `validate.ts`. Partial update — only provided fields are written. An empty string on a clearable text field (`breed`, `medicalNotes`, etc.) clears it to `null`. `age`, `sex`, and `weightLb` accept explicit `null` to clear the value. |
@@ -942,12 +979,21 @@ these back computed/gated fields (see `Job Resolver Behavior` below), not root o
 | `CreateServiceAddOnInput` | `serviceOfferingId`, `title`, `pricePerSession`, `perSession?` | Zod schema (`createServiceAddOnSchema`) requires a positive price with ≤2 decimal places; no resolver consumes it yet. |
 | `UpdateServiceAddOnInput` | `serviceAddOnId`, `title?`, `pricePerSession?`, `perSession?`, `isActive?` | Zod schema (`updateServiceAddOnSchema`) requires a UUID id and at least one other field; no resolver consumes it yet. |
 
+> **`getNearbyBusinesses` has no input type** — its six args (`latitude`, `longitude`, `radiusMiles`,
+> `category`, `search`, `limit`) are declared directly on the query field, not wrapped in an
+> `input`. It's still Zod-validated (`getNearbyBusinessesSchema`), which is a deliberate deviation
+> from every other query in this codebase (queries elsewhere use lightweight inline checks, not
+> Zod) — justified specifically because this resolver builds raw SQL; see `Business Resolver
+> Behavior` below. `radiusMiles` defaults to `25` (max `100`), `limit` defaults to `20` (max `50`) —
+> both bounds exist to cap the underlying query's cost, not just for a friendly error message.
+
 ### GraphQL Object Types
 
 | Type               | Fields                                      | Notes                                    |
 |--------------------|---------------------------------------------|------------------------------------------|
 | `User`             | `id, email, firstName, lastName, phone?, avatarUrl?, globalRole, createdAt` | User responses intentionally omit `passwordHash`. |
-| `Business`         | `id, name, description?, isActive, createdAt` | The GraphQL type does not currently expose PostGIS location or `updatedAt`. |
+| `Business`         | `id, name, description?, isActive, isVerified, heroPhotoUrl?, addressLine?, city?, neighborhood?, serviceFeeAmount?, avgRating?, reviewCount, createdAt` | Does not expose PostGIS `location` (no natural GraphQL scalar for it — see `getNearbyBusinesses` for the computed-distance alternative) or `updatedAt`. `avgRating`/`serviceFeeAmount` go through a type-level field resolver for Decimal→Number conversion. |
+| `NearbyBusiness`   | `business: Business!, distanceMiles: Float!, fromPrice: Float` | Returned only by `getNearbyBusinesses`. `fromPrice` is `MIN(basePrice)` across the business's active `ServiceOffering`s — `null` if it has none with a `basePrice` set. |
 | `AuthPayload`      | `token: String!, user: User!`               | Returned by `registerCustomer`, `login`, `acceptInvitation` |
 | `OwnerAuthPayload` | `token: String!, user: User!, business: Business!` | Returned by `registerOwner`       |
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
@@ -984,8 +1030,44 @@ The following handlers are implemented and registered through `resolvers/busines
 - `getBusinessMembers` accepts any active business member role and returns active members with their user profile, ordered by `joinedAt` ascending.
 - `getInactiveBusinessMembers` accepts any active business member role and returns inactive members with their user profile, ordered by `joinedAt` ascending.
 - `updateBusiness` permits only an active OWNER or MANAGER of the target business. It applies a partial update and treats an empty description as `null`.
+- `setBusinessLocation` permits only an active OWNER or MANAGER of the target business. Writes via `$executeRaw` (`UPDATE "Business" SET "location" = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326), "updatedAt" = NOW() WHERE "id" = ...`) since `Business.location` is `Unsupported("geometry")` and Prisma's normal `update()` can't write to it at all. Manually sets `updatedAt` since bypassing `update()` also bypasses Prisma's automatic `@updatedAt` handling. Returns the row via a fresh `findUniqueOrThrow` after the raw write, not the pre-write object.
 - `deactivateBusiness` is active-OWNER-only, rejects unknown or already inactive businesses, and performs a soft delete by setting `isActive` to `false`.
 - `removeMember` permits active OWNERs to remove MANAGERs or EMPLOYEEs and active MANAGERs to remove EMPLOYEEs only. It rejects self-removal, removal of the OWNER, already inactive members, and members from another business. It retains the row and sets its `isActive` flag to `false`.
+
+**`getNearbyBusinesses`** — public, no auth (same as `getBusinessReviews`); this is the PostGIS-backed
+nearby-search behind the customer discovery/home screens. Prisma has no query-builder support for
+geometry columns, so it's built entirely on `context.prisma.$queryRaw`. Everything dynamic —
+including the `category`/`search` WHERE fragments, which are only conditionally included at all —
+is composed with `Prisma.sql`/`Prisma.join`, never string concatenation, so every value stays a
+driver-parameterized placeholder regardless of how the WHERE clause's shape changes. **Never rewrite
+this resolver's SQL assembly using template-literal string interpolation** — that would reopen SQL
+injection on a publicly-reachable, unauthenticated query.
+
+Distance handling follows the standard PostGIS idiom for "nearby, ranked by distance" search:
+- `ORDER BY b."location" <-> ST_SetSRID(ST_MakePoint(lng, lat), 4326)` sorts using the raw
+  `geometry` column specifically so Postgres can use the `business_location_idx` GiST index for fast
+  KNN ordering. (There is no geography-typed index on this column — ordering by a `::geography` cast
+  instead would silently fall back to a full scan.)
+- `ST_DWithin`/`ST_Distance` both cast to `::geography` so the radius filter and the returned
+  `distanceMiles` are accurate real-world distance, not raw coordinate-degree distance.
+- A `Business` with `location IS NULL` can never match — `ST_DWithin` against a `NULL` geography
+  evaluates to `NULL` (not `TRUE`) in the `WHERE` clause, so it's excluded rather than erroring.
+  The resolver also states this explicitly (`b."location" IS NOT NULL`) rather than relying on that
+  implicit behavior alone.
+
+`category` filters via `EXISTS (SELECT 1 FROM "ServiceOffering" so WHERE so."businessId" = b."id"
+AND so."isActive" = true AND so."category" = ...)` — a business matches if it has *any* matching
+active offering. `search` does a simple `ILIKE '%...%'` against `b."name"` only (no full-text search
+infrastructure exists in this codebase). `fromPrice` is a correlated subquery,
+`MIN(so."basePrice")` over that business's active offerings, chosen specifically to avoid needing a
+`GROUP BY` across every selected column that a `JOIN`-based aggregate would require.
+
+The raw rows' `avgRating`/`serviceFeeAmount`/`distanceMiles`/`fromPrice` are all Decimal-ish or
+computed numeric values of uncertain runtime shape (string vs. `Decimal` vs. `number`, depending on
+the driver) — `distanceMiles` and `fromPrice` are converted inline in the resolver with `Number()`
+since only this one resolver produces them; `avgRating`/`serviceFeeAmount` are passed through
+unconverted into the nested `business` object and rely on the shared `Business` type-level field
+resolver (below) to convert them — the same one every other Business-returning operation uses.
 
 ### Customer Resolver Behavior
 
@@ -1110,7 +1192,23 @@ The following handlers are implemented and registered through `resolvers/review/
 ### Geospatial Search
 - Business and CustomerProfile locations stored as PostGIS `geometry(Point, 4326)`
 - Use `ST_DWithin` for radius filtering and `<->` operator for nearest-neighbor sorting
-- Raw SQL via `prisma.$queryRaw` is required for PostGIS queries — Prisma does not generate PostGIS helpers
+- Raw SQL via `prisma.$queryRaw` (reads) or `$executeRaw` (writes) is required for PostGIS
+  columns — Prisma does not generate query-builder helpers for them, and can't write to them via
+  its normal `create()`/`update()` API at all (`location` is `Unsupported("geometry")`)
+- **Reference implementation, read side**: `getNearbyBusinesses` (`resolvers/business/queries/getNearbyBusinesses.ts`)
+  is the first (and so far only) resolver that does this — follow its pattern for any future
+  `CustomerProfile.location`-based query (e.g. a future "sitters near this customer" query). In
+  particular: `ORDER BY ... <->` on the raw `geometry` column (index-accelerated), `::geography`
+  casts on `ST_DWithin`/`ST_Distance` for accurate real-world distance, and building every dynamic
+  WHERE fragment with `Prisma.sql`/`Prisma.join` — never string interpolation — since raw SQL is the
+  one place in this codebase where a careless mistake is a direct SQL injection risk, not just a bug.
+- **Reference implementation, write side**: `setBusinessLocation`
+  (`resolvers/business/mutations/setBusinessLocation.ts`) is the only mutation that writes
+  `Business.location`, via `$executeRaw`. Nothing else does — not `registerOwner`, not
+  `updateBusiness` — so a freshly-created business is invisible to `getNearbyBusinesses` until this
+  is called explicitly. A raw write also bypasses Prisma's automatic `@updatedAt` handling, so
+  `"updatedAt" = NOW()` must be set manually in the same statement, and the resolver re-fetches the
+  row afterward (`findUniqueOrThrow`) rather than trusting a pre-write in-memory copy.
 
 ### Financial Ledger
 - **Never** update a balance in place — always append a new `LedgerEntry`

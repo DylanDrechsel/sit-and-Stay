@@ -174,6 +174,44 @@ export const removeMemberSchema = z.object({
     memberId: memberIdField,
 });
 
+const serviceCategoryField = z.enum(
+    ['WALKING', 'BOARDING', 'DROP_IN', 'DAY_CARE', 'TRAINING', 'GROOMING', 'HOUSE_SITTING'],
+    { message: 'Category must be a valid service category' },
+);
+
+// Reusable fields — anything that takes a raw coordinate (search origin or a
+// business's own location) validates against these same bounds.
+const latitudeField = z.number().min(-90, 'Latitude must be between -90 and 90').max(90, 'Latitude must be between -90 and 90');
+const longitudeField = z.number().min(-180, 'Longitude must be between -180 and 180').max(180, 'Longitude must be between -180 and 180');
+
+/**
+ * Validates input for nearby-business discovery (getNearbyBusinesses).
+ * This resolver builds raw SQL for the underlying PostGIS query, so validation
+ * here is intentionally stricter than other read queries in this codebase —
+ * radiusMiles and limit exist to bound the cost of the query itself, not just
+ * to produce a friendly error message.
+ */
+export const getNearbyBusinessesSchema = z.object({
+    latitude: latitudeField,
+    longitude: longitudeField,
+    radiusMiles: z.number().positive('Radius must be greater than 0').max(100, 'Radius cannot exceed 100 miles').default(25),
+    category: serviceCategoryField.optional(),
+    search: z.string().trim().min(1, 'Search cannot be empty').max(100, 'Search too long').optional(),
+    limit: z.number().int('Limit must be a whole number').positive('Limit must be greater than 0').max(50, 'Limit cannot exceed 50').default(20),
+});
+
+/**
+ * Validates input for setting a business's PostGIS location. This also
+ * builds raw SQL ($executeRaw, since Prisma can't write Unsupported columns
+ * through its normal update API), hence reusing the same strict lat/lng
+ * bounds as getNearbyBusinessesSchema.
+ */
+export const setBusinessLocationSchema = z.object({
+    businessId: businessIdField,
+    latitude: latitudeField,
+    longitude: longitudeField,
+});
+
 // ── Service schemas ────────────────────────────────────────────────────────
 
 // Reusable field — service operations require a valid ServiceOffering.id
