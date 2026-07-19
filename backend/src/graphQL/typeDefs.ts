@@ -28,6 +28,11 @@ const typeDefs = `#graphql
     serviceFeeAmount: Float
     avgRating: Float
     reviewCount: Int!
+    # Fallback share of a job's price paid to the assigned sitter, as a percent
+    # (60 = 60%). Applies only to members with no payRatePercent of their own.
+    # SENSITIVE — internal business data, not storefront data. Resolves to null
+    # unless the caller is an active OWNER/MANAGER of this business.
+    defaultSitterPayPercent: Float
     createdAt: DateTime!
   }
 
@@ -67,6 +72,11 @@ const typeDefs = `#graphql
     isActive: Boolean!
     joinedAt: DateTime!
     user: User!          # Full profile of the member
+    # This member's share of a job's price, as a percent (60 = 60%); null means
+    # the business default applies. SENSITIVE — resolves to null unless the
+    # caller is this member or an active OWNER/MANAGER of their business, so a
+    # sitter can't read a colleague's pay through a nested selection.
+    payRatePercent: Float
     # Recurring weekly schedule, Monday→Sunday. Lazily resolved, so it costs
     # nothing on queries that don't ask for it. Days never configured are simply
     # absent from the list — see setAvailability.
@@ -322,6 +332,16 @@ const typeDefs = `#graphql
     businessId: ID!
     name: String
     description: String
+    # 0-100, max 2 decimals. Pass null to clear the business-wide default.
+    defaultSitterPayPercent: Float
+  }
+
+  # memberId is the BusinessMember.id, not the User.id. Pass a null
+  # payRatePercent to clear the override and fall back to the business default.
+  input SetMemberPayRateInput {
+    businessId: ID!
+    memberId: ID!
+    payRatePercent: Float
   }
 
   # memberId is the BusinessMember.id (the membership record), not the User.id
@@ -508,6 +528,12 @@ const typeDefs = `#graphql
     reason: String
   }
 
+  # amount is in dollars — positive, at most 2 decimal places.
+  input AddTipInput {
+    jobId: ID!
+    amount: Float!
+  }
+
   input PostJobUpdateInput {
     jobId: ID!
     note: String
@@ -524,6 +550,93 @@ const typeDefs = `#graphql
     drankWater: Boolean
     gaveTreat: Boolean
     summary: String
+  }
+
+  # ── Finance ────────────────────────────────────────────────────────
+  # Two separate books. LedgerEntry is the business's cash position and carries a
+  # running balance. EmployeeEarning is what the business owes an individual
+  # sitter and carries no balance — an outstanding total is derived by summing
+  # the rows with no payout attached. See src/utils/ledger.ts.
+
+  # One immutable line of a business's cash ledger. Never updated once written;
+  # corrections are new ADJUSTMENT/REFUND entries, not edits.
+  type LedgerEntry {
+    id: ID!
+    # Monotonic ordering key. Sort by this, not createdAt — entries written in
+    # one transaction share a timestamp.
+    seq: Int!
+    entryType: String!      # CREDIT | DEBIT
+    amount: Float!          # always positive; entryType carries the direction
+    balanceAfter: Float!    # business cash balance after this entry
+    currency: String!
+    referenceType: String!  # JOB_PAYMENT | TIP | PAYOUT | REFUND | ADJUSTMENT
+    description: String
+    createdAt: DateTime!
+    job: Job                # set on job-derived entries
+    payout: Payout          # set on the PAYOUT debit
+  }
+
+  # One thing a sitter earned. ratePercent/basisAmount are the snapshotted
+  # rule that produced the amount, so changing a pay rate never restates history.
+  type EmployeeEarning {
+    id: ID!
+    type: String!           # JOB_PAY | TIP | BONUS | ADJUSTMENT
+    amount: Float!
+    ratePercent: Float      # null on BONUS/ADJUSTMENT, which are flat amounts
+    basisAmount: Float      # what ratePercent applied to
+    isPaid: Boolean!        # derived — true once a payout covers this earning
+    description: String
+    createdAt: DateTime!
+    job: Job
+    member: BusinessMember!
+    payout: Payout
+  }
+
+  # A single settlement to one sitter, covering the earnings attached to it.
+  type Payout {
+    id: ID!
+    amount: Float!
+    status: String!         # PENDING | PAID | FAILED
+    method: String
+    note: String
+    paidAt: DateTime
+    createdAt: DateTime!
+    member: BusinessMember!
+    earnings: [EmployeeEarning!]!
+  }
+
+  # Headline numbers for the owner dashboard.
+  type BusinessFinancialSummary {
+    # Cash on hand: the running balance from the most recent ledger entry.
+    currentBalance: Float!
+    # Total accrued to sitters and not yet paid out — a liability, not cash.
+    unpaidEarningsTotal: Float!
+    # currentBalance minus unpaidEarningsTotal. Can go negative, which means
+    # more is owed to sitters than the business has recorded taking in.
+    availableBalance: Float!
+    # Completed jobs that had an assigned sitter but produced no JOB_PAY,
+    # because neither the sitter nor the business had a pay rate set at the
+    # time. Non-zero means someone worked and accrued nothing — surface it.
+    jobsMissingPayCount: Int!
+  }
+
+  # One row of the payroll screen: what a single sitter is currently owed.
+  type MemberEarningsSummary {
+    member: BusinessMember!
+    unpaidTotal: Float!
+    unpaidCount: Int!
+  }
+
+  # Note there is no amount field. The payout total is summed from the earnings
+  # it settles, so it can never disagree with its own line items.
+  input RecordPayoutInput {
+    businessId: ID!
+    memberId: ID!
+    # ISO date-time. Settles only earnings accrued on or before it — a payroll
+    # cutoff. Omit to settle everything outstanding.
+    throughDate: String
+    method: String   # free text, e.g. "Venmo", "Direct deposit"
+    note: String
   }
 
   # ── Queries ────────────────────────────────────────────────────────
@@ -605,6 +718,27 @@ const typeDefs = `#graphql
     # Returns a job's live update feed, newest first (same access as getJob).
     # Cursor pagination: pass the oldest createdAt you have as 'before' for the next page.
     getJobUpdates(jobId: ID!, limit: Int, before: String): [JobUpdate!]!
+
+    # ── Finance queries ————————————————————————
+
+    # A business's ledger statement, newest first (OWNER/MANAGER only).
+    # Cursor pagination on seq: pass the lowest seq you have as 'before'.
+    getBusinessLedger(businessId: ID!, limit: Int, before: Int): [LedgerEntry!]!
+
+    # Headline finance numbers for the owner dashboard (OWNER/MANAGER only).
+    getBusinessFinancialSummary(businessId: ID!): BusinessFinancialSummary!
+
+    # What each sitter is currently owed, for the payroll screen (OWNER/MANAGER
+    # only). Members with nothing outstanding are omitted.
+    getUnpaidEarningsByMember(businessId: ID!): [MemberEarningsSummary!]!
+
+    # Earnings for one business's sitters, newest first (OWNER/MANAGER only).
+    # memberId narrows to a single sitter; unpaidOnly hides settled earnings.
+    getBusinessEarnings(businessId: ID!, memberId: ID, unpaidOnly: Boolean, limit: Int): [EmployeeEarning!]!
+
+    # The caller's own earnings at one business, newest first. Any active member
+    # can call this for themselves — it needs no OWNER/MANAGER role.
+    getMyEarnings(businessId: ID!, unpaidOnly: Boolean, limit: Int): [EmployeeEarning!]!
   }
 
   # ── Mutations ──────────────────────────────────────────────────────
@@ -656,6 +790,12 @@ const typeDefs = `#graphql
     # Soft-removes a member from a business by setting BusinessMember.isActive to false
     # OWNER can remove MANAGER or EMPLOYEE; MANAGER can only remove EMPLOYEE
     removeMember(input: RemoveMemberInput!): BusinessMember!
+
+    # Sets one member's share of a job's price. OWNER only — deliberately
+    # stricter than removeMember, since a MANAGER must not be able to set pay
+    # (including their own). Takes effect on jobs completed after this point;
+    # earnings already accrued keep the rate snapshotted on them.
+    setMemberPayRate(input: SetMemberPayRateInput!): BusinessMember!
 
     # Writes one or more days of a member's recurring weekly schedule — the data
     # getAvailableEmployees reads when deciding who can be assigned to a job.
@@ -734,6 +874,21 @@ const typeDefs = `#graphql
     # declineJob); IN_PROGRESS is business-only (the sitter is already on site).
     # The assigned sitter cannot cancel — they ask a manager to reassign.
     cancelJob(input: CancelJobInput!): Job!
+
+    # Tips the sitter on a COMPLETED job (the job's customer only). Credits the
+    # business ledger and accrues the tip in full to the assigned sitter, in the
+    # same transaction that writes Job.tipAmount. One tip per job, final — there
+    # is no edit or reversal flow, since a tip can be paid out immediately.
+    addTip(input: AddTipInput!): Job!
+
+    # ── Finance mutations ————————————————————————
+
+    # Settles a sitter's outstanding earnings: creates a PAID Payout covering
+    # them, marks them paid, and debits the business ledger, in one transaction.
+    # OWNER only. Records a transfer made outside the app — nothing here moves
+    # real money. The amount is derived from the earnings, not from input.
+    # No reversal exists: correct a mistake with an ADJUSTMENT earning.
+    recordPayout(input: RecordPayoutInput!): Payout!
 
     # ── Review mutations ————————————————————————
 

@@ -6,6 +6,7 @@ import { clockIn } from './mutations/clockIn.js';
 import { clockOut } from './mutations/clockOut.js';
 import { completeJob } from './mutations/completeJob.js';
 import { cancelJob } from './mutations/cancelJob.js';
+import { addTip } from './mutations/addTip.js';
 import { postJobUpdate } from './mutations/postJobUpdate.js';
 import { submitReportCard } from './mutations/submitReportCard.js';
 import { getAvailableEmployees } from './queries/getAvailableEmployees.js';
@@ -35,6 +36,7 @@ export const jobResolvers = {
         clockOut,
         completeJob,
         cancelJob,
+        addTip,
         postJobUpdate,
         submitReportCard,
     },

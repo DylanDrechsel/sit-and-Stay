@@ -15,7 +15,8 @@
 - **Customers** (pet owners) who search for nearby sitters, book services, and leave reviews
 - **Employees** who are assigned jobs by business owners/managers
 - Real-time **messaging** between businesses↔customers and businesses↔employees
-- An immutable **financial ledger** per business for payment tracking
+- An immutable **financial ledger** per business for cash tracking, plus a separate **employee pay
+  subledger** (per-job sitter earnings, tips, and payouts) — see `Finance Resolver Behavior` in §10
 
 ---
 
@@ -69,6 +70,9 @@ pet_sitter_pro/
     │   │   ├── generatePrisma.ts  # Prisma singleton using pg.Pool + PrismaPg adapter
     │   │   ├── auth.ts            # hashPassword, comparePassword, signToken, verifyToken, TokenPayload
     │   │   ├── email.ts           # Nodemailer transporter + sendInvitationEmail
+    │   │   ├── ledger.ts          # THE financial write layer — appendLedgerEntry, runSerializable,
+    │   │   │                      #   recordJobCompletionFinancials, recordTipFinancials,
+    │   │   │                      #   settleEarningsIntoPayout. Nothing else writes money tables.
     │   │   └── validate.ts        # Zod schemas for all inputs + formatZodError helper
     │   └── graphQL/
     │       ├── typeDefs.ts        # GraphQL schema (SDL)
@@ -162,6 +166,17 @@ pet_sitter_pro/
     │           │       ├── createServicePackage.ts
     │           │       ├── updateServicePackage.ts
     │           │       └── deleteServicePackage.ts
+    │           ├── finance/
+    │           │   ├── financeResolvers.ts  # also exports LedgerEntry/EmployeeEarning/Payout type maps
+    │           │   ├── financeAccess.ts     # requireFinanceManager (books), requireActiveMembership (own pay)
+    │           │   ├── queries/
+    │           │   │   ├── getBusinessLedger.ts
+    │           │   │   ├── getBusinessFinancialSummary.ts
+    │           │   │   ├── getUnpaidEarningsByMember.ts
+    │           │   │   ├── getBusinessEarnings.ts
+    │           │   │   └── getMyEarnings.ts
+    │           │   └── mutations/
+    │           │       └── recordPayout.ts
     │           └── utils/
     │               ├── utilsResolvers.ts
     │               └── mutations/
@@ -172,12 +187,15 @@ pet_sitter_pro/
 ```
 
 > **Convention**: Each domain folder (`owner/`, `customer/`, `job/`, `invitation/`, `user/`,
-> `business/`, `review/`, `service/`, `utils/`) contains a `*Resolvers.ts` barrel file that groups
-> its `Query` and `Mutation` maps. The root `resolvers/index.ts` must explicitly import and spread
-> each barrel; adding a domain folder alone does not expose its fields through GraphQL. Several
+> `business/`, `review/`, `service/`, `finance/`, `utils/`) contains a `*Resolvers.ts` barrel file
+> that groups its `Query` and `Mutation` maps. The root `resolvers/index.ts` must explicitly import
+> and spread each barrel; adding a domain folder alone does not expose its fields through GraphQL,
+> and the `Query` and `Mutation` maps are spread **separately** — wiring one and forgetting the
+> other leaves an operation declared in the SDL with no resolver behind it. Several
 > barrels also export **type-level field maps** (`job` → `Job`/`Booking`/`BookingAddOn`, `business`
-> → `Business`, `customer` → `CustomerProfile`, `service` → `ServiceOffering`/
-> `ServiceOfferingAddOn`) — `resolvers/index.ts` attaches those directly as top-level keys alongside
+> → `Business`/`BusinessMember`, `customer` → `CustomerProfile`, `service` → `ServiceOffering`/
+> `ServiceOfferingAddOn`, `finance` → `LedgerEntry`/`EmployeeEarning`/`Payout`) —
+> `resolvers/index.ts` attaches those directly as top-level keys alongside
 > `Query`/`Mutation`/`JSON`, not inside either of them.
 
 ---
@@ -309,6 +327,8 @@ All IDs use `uuid()`. Models with timestamps have both `createdAt` and `updatedA
 | `JobStatus`          | `PENDING`, `ACCEPTED`, `ASSIGNED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`, `DECLINED` |
 | `EntryType`          | `CREDIT`, `DEBIT`                                                   |
 | `LedgerReferenceType`| `JOB_PAYMENT`, `TIP`, `PAYOUT`, `REFUND`, `ADJUSTMENT`             |
+| `EarningType`        | `JOB_PAY`, `TIP`, `BONUS`, `ADJUSTMENT` — what an `EmployeeEarning` row is |
+| `PayoutStatus`       | `PENDING`, `PAID`, `FAILED` — **only `PAID` is produced today**; the other two are reserved for a future payment processor |
 | `AuthProvider`       | `EMAIL`, `GOOGLE`, `APPLE` — how a `User` authenticates            |
 | `PetSex`             | `MALE`, `FEMALE`                                                    |
 | `ServiceCategory`    | `WALKING`, `BOARDING`, `DROP_IN`, `DAY_CARE`, `TRAINING`, `GROOMING`, `HOUSE_SITTING` |
@@ -370,6 +390,7 @@ A pet sitting business (the tenant in the multi-tenant model).
 | `serviceFeeAmount`| Decimal?  | precision `(10,2)`; flat per-booking checkout fee |
 | `avgRating`      | Decimal?   | precision `(3,2)`; denormalized review average   |
 | `reviewCount`    | Int        | default `0`; denormalized review count           |
+| `defaultSitterPayPercent`| Decimal? | precision `(5,2)`; fallback sitter pay share, e.g. `60.00` = 60%. **SENSITIVE** — see below |
 | `location`       | geometry?  | PostGIS Point (lng, lat) for geospatial search   |
 
 > `avgRating`/`reviewCount` are denormalized for fast list rendering — they are not auto-maintained
@@ -379,11 +400,22 @@ A pet sitting business (the tenant in the multi-tenant model).
 > or `deleteReview` yet — if either is added later, it must recompute and write these two fields the
 > same way, or the aggregate will silently drift from the underlying review rows.
 
+> `defaultSitterPayPercent` is the fallback used only when a `BusinessMember` has no
+> `payRatePercent` of their own. It is **internal business data, not storefront data** — a customer
+> must not see what cut a business pays its sitters — so it resolves through a gated type-level
+> resolver (`businessResolvers.ts`) that returns `null` unless the caller is an active
+> `OWNER`/`MANAGER`, in the same style as `Job.accessCode`. This matters because `Business` is
+> reachable from unauthenticated paths: `getNearbyBusinesses` is public. That query's hand-written
+> raw SELECT does not fetch the column at all, so it resolves `null` there even for an owner — the
+> safe direction to be wrong in. Set it via `updateBusiness`.
+
 **Relations:**
 - `members` → `BusinessMember[]`
 - `offerings` → `ServiceOffering[]`
 - `jobs` → `Job[]`
 - `ledgerEntries` → `LedgerEntry[]`
+- `earnings` → `EmployeeEarning[]`
+- `payouts` → `Payout[]`
 - `reviews` → `Review[]`
 - `invitations` → `Invitation[]`
 - `conversations` → `Conversation[]`
@@ -426,6 +458,7 @@ A user can be a member of multiple businesses, but only one role per business (`
 | `isActive`  | Boolean      | default `true`; set to `false` when the member is removed |
 | `backgroundCheckStatus`| BackgroundCheckStatus | default `NOT_STARTED`; sitter onboarding |
 | `onboardingCompletedAt`| DateTime? | set when the invite → onboarding flow finishes |
+| `payRatePercent`| Decimal? | precision `(5,2)`; this sitter's pay share, overriding the business default. **SENSITIVE** — see below |
 | `joinedAt`  | DateTime     | default now                         |
 
 **Relations:**
@@ -434,8 +467,18 @@ A user can be a member of multiple businesses, but only one role per business (`
 - `availability` → `EmployeeAvailability[]`
 - `assignedJobs` → `Job[]` (via `JobAssignee` relation name)
 - `conversations` → `Conversation[]` (Owner↔Employee conversations)
+- `earnings` → `EmployeeEarning[]`
+- `payouts` → `Payout[]`
 
 **Indexes:** `businessId`, `(businessId, isActive)`
+
+> `payRatePercent` overrides `Business.defaultSitterPayPercent`. It is read **only** at the moment an
+> earning is written and is snapshotted onto that row, so editing it never restates pay already
+> accrued. Written by `setMemberPayRate` (**OWNER only** — deliberately stricter than `removeMember`,
+> which lets a MANAGER act on EMPLOYEEs; nothing else in the model would stop a MANAGER raising their
+> own pay). Read through a gated type-level resolver that returns `null` unless the caller is that
+> member or an active `OWNER`/`MANAGER` — without which a sitter could read a colleague's pay through
+> a nested selection like `getAvailableEmployees { member { payRatePercent } }`.
 
 `removeMember` is a soft removal: it preserves the membership and related history while setting
 `isActive` to `false`. A later accepted invitation for the same user and business reactivates
@@ -732,6 +775,7 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 - `assignee` → `BusinessMember?`
 - `pets` → `Pet[]` (via `JobPets` many-to-many)
 - `ledgerEntries` → `LedgerEntry[]`
+- `earnings` → `EmployeeEarning[]` — the sitter pay and tip this job accrued
 - `review` → `Review?`
 - `conversation` → `Conversation?`
 - `updates` → `JobUpdate[]` — live photo/note feed during the job
@@ -827,24 +871,94 @@ One-to-one with `Job` (`jobId` is unique).
 
 ---
 
-### Model: `LedgerEntry` → table `ledger_entries`
+### Model: `LedgerEntry` → table `"LedgerEntry"`
 
-Immutable financial record. Every payment event appends a new row — balances are never mutated in place.
-Use Prisma `$transaction` with `isolationLevel: Serializable` when writing entries to prevent race conditions.
+The business's **cash** position. Immutable: every payment event appends a new row and balances are
+never mutated in place. All writes go through `appendLedgerEntry` in `src/utils/ledger.ts` — nothing
+else may write this table, because the balance invariant is only enforceable with one path in.
 
 | Field          | Type                | Notes                              |
 |----------------|---------------------|------------------------------------|
 | `id`           | String              | uuid, primary key                  |
-| `businessId`   | String              | FK → `businesses.id`               |
-| `jobId`        | String?             | FK → `jobs.id`, optional           |
+| `seq`          | Int                 | `@unique @default(autoincrement())` — **the ordering key**; see warning below |
+| `businessId`   | String              | FK → `"Business".id`               |
+| `jobId`        | String?             | FK → `"Job".id`, optional          |
+| `payoutId`     | String?             | `@unique`, FK → `"Payout".id` — set on the `PAYOUT` debit; the uniqueness makes double-debiting one payout impossible |
 | `entryType`    | EntryType           | `CREDIT` or `DEBIT`                |
-| `amount`       | Decimal             | USD, precision `(10,2)`            |
+| `amount`       | Decimal             | USD, precision `(10,2)` — **always positive**; `entryType` carries direction |
 | `balanceAfter` | Decimal             | running balance after this entry   |
 | `currency`     | String              | default `"USD"`                    |
 | `referenceType`| LedgerReferenceType | reason for the entry               |
 | `description`  | String?             | optional human-readable note       |
 
-**Indexes:** `(businessId, createdAt DESC)` — for efficient balance history queries
+**Indexes:** `(businessId, seq DESC)` for the latest-balance read; `(businessId, createdAt DESC)` for
+date-range statements.
+
+> ⚠️ **Never order this table by `createdAt` to find the latest entry.** Postgres
+> `CURRENT_TIMESTAMP` is transaction-*start* time, so entries appended in one transaction share an
+> identical `createdAt` and "latest by createdAt" picks between them arbitrarily — which silently
+> breaks the running balance. Order by `seq`, which is unique and monotonic. This also makes `seq`
+> the only safe pagination cursor (`getBusinessLedger` uses `seq < before`).
+
+---
+
+### Model: `EmployeeEarning` → table `"EmployeeEarning"`
+
+The accounts-payable subledger: what the business owes an individual sitter. Deliberately **not**
+part of `LedgerEntry` — that table carries a running `balanceAfter`, and a running balance is only
+meaningful for one account; mixing per-sitter rows in would make that column ambiguous.
+
+**There is no `balanceAfter` here, on purpose.** A sitter's outstanding total is *derived*:
+`sum(amount) where payoutId is null`. That keeps the accrual path a plain insert with nothing to
+serialize against, so only the business ledger needs `Serializable`.
+
+| Field         | Type          | Notes                                        |
+|---------------|---------------|----------------------------------------------|
+| `id`          | String        | uuid, primary key                            |
+| `businessId`  | String        | FK → `"Business".id`                         |
+| `memberId`    | String        | FK → `"BusinessMember".id` — pay is scoped per business, not per `User` |
+| `jobId`       | String?       | FK → `"Job".id`; null on `BONUS`/`ADJUSTMENT` |
+| `type`        | EarningType   | `JOB_PAY`, `TIP`, `BONUS`, `ADJUSTMENT`      |
+| `amount`      | Decimal       | USD, precision `(10,2)`                      |
+| `ratePercent` | Decimal?      | `(5,2)` — snapshot of the rate that produced `amount` |
+| `basisAmount` | Decimal?      | `(10,2)` — what `ratePercent` applied to (`Job.price` for `JOB_PAY`, the tip for `TIP`) |
+| `payoutId`    | String?       | FK → `"Payout".id`; **null means unpaid**    |
+| `description` | String?       | optional note                                |
+
+**Indexes:** `@@unique([jobId, type])`; `(memberId, payoutId)` for "what's still owed"; `(businessId,
+createdAt DESC)`.
+
+`ratePercent`/`basisAmount` exist for the same reason as `BookingAddOn.priceAtBooking`: changing a
+sitter's pay rate must never restate what they already earned.
+
+> The `@@unique([jobId, type])` constraint is the **double-credit backstop**. `COMPLETED` is
+> reachable from both `clockOut` and `completeJob`, so this makes crediting one job twice impossible
+> at the DB level rather than dependent on both resolvers remembering to check. Because Postgres
+> treats NULLs as distinct, it still permits many `BONUS`/`ADJUSTMENT` rows with a null `jobId`.
+
+---
+
+### Model: `Payout` → table `"Payout"`
+
+One settlement to one sitter, covering the `EmployeeEarning` rows that point at it.
+
+| Field        | Type         | Notes                                     |
+|--------------|--------------|-------------------------------------------|
+| `id`         | String       | uuid, primary key                         |
+| `businessId` | String       | FK → `"Business".id`                      |
+| `memberId`   | String       | FK → `"BusinessMember".id`                |
+| `amount`     | Decimal      | `(10,2)` — **summed from the claimed earnings, never client-supplied** |
+| `status`     | PayoutStatus | always `PAID` today                       |
+| `method`     | String?      | free text, e.g. `"Venmo"`, `"Direct deposit"` |
+| `note`       | String?      | optional note                             |
+| `paidAt`     | DateTime?    | set when status becomes `PAID`            |
+
+**Indexes:** `(businessId, createdAt DESC)`; `(memberId, status)`.
+
+FKs from `EmployeeEarning` and `Payout` back to `BusinessMember` are **restrict, not cascade** — a
+hard delete of a member with financial history fails rather than destroying it. Note `User →
+BusinessMember` *is* cascade, so hard-deleting a `User` who has earnings will fail on that FK. Members
+are soft-deleted (`isActive: false`) everywhere in this app, so this shouldn't arise in normal use.
 
 ---
 
@@ -935,18 +1049,26 @@ Every resolver receives (typed as `GraphQLContext` in `src/types/context.ts`):
 
 The GraphQL SDL in `typeDefs.ts` and the resolver map in `resolvers/index.ts` are expected to stay,
 and currently do stay, in lockstep — every domain's barrel is spread into the root map: user,
-business, customer, job, review, and service all contribute `Query` fields; invitation, owner,
-customer, utils, user, business, job, review, and service all contribute `Mutation` fields.
+business, customer, job, review, service, and finance all contribute `Query` fields; invitation,
+owner, customer, utils, user, business, job, review, service, and finance all contribute `Mutation`
+fields.
 `registerOwner` is registered only as a mutation. The job domain has a full read side —
 `getMyBookings`, `getBusinessJobs`, `getMyJobs`, `getJob`, `getJobUpdates`, plus
 `getAvailableEmployees` — so jobs and bookings are discoverable through GraphQL, not just mutable
 by ID. The service domain has full CRUD for `ServiceOffering`, `ServiceOfferingAddOn`, and
 `ServicePackage` — see `Service Resolver Behavior` below for its member-vs-public read visibility
-rule, which is the one non-obvious thing about it. Several domains also register **type-level**
-field resolvers (`Job`, `Booking`, `BookingAddOn`, `Business`, `CustomerProfile`,
-`ServiceOffering`, `ServiceOfferingAddOn`, `ServicePackage`) spread directly onto the root resolver
-map alongside `Query`/`Mutation`/`JSON` — these back computed/gated/lazy fields (see the per-domain
-behavior sections below), not root operations.
+rule, which is the one non-obvious thing about it. The finance domain
+(`resolvers/finance/`) covers the money side: five read queries plus `recordPayout` — see
+`Finance Resolver Behavior` below. Several domains also register **type-level**
+field resolvers (`Job`, `Booking`, `BookingAddOn`, `Business`, `BusinessMember`, `CustomerProfile`,
+`ServiceOffering`, `ServiceOfferingAddOn`, `ServicePackage`, `LedgerEntry`, `EmployeeEarning`,
+`Payout`) spread directly onto the root resolver map alongside `Query`/`Mutation`/`JSON` — these
+back computed/gated/lazy fields (see the per-domain behavior sections below), not root operations.
+
+> Adding a domain folder alone does **not** wire it in. Both the `Query` and `Mutation` maps must be
+> spread separately in `resolvers/index.ts`, and it is easy to add one and forget the other — that
+> failure mode leaves the operation declared in the SDL with no resolver behind it, which surfaces
+> only when something calls it. This happened while building `recordPayout`.
 
 ### Declared Queries
 
@@ -972,6 +1094,11 @@ behavior sections below), not root operations.
 | `getServiceAddOn` | `serviceAddOnId: ID!` | `ServiceOfferingAddOn!` | Member-vs-public | `resolvers/service/queries/getServiceAddOn.ts` |
 | `getServiceAddOns` | `serviceOfferingId: ID!` | `[ServiceOfferingAddOn!]!` | Member-vs-public | `resolvers/service/queries/getServiceAddOns.ts` |
 | `getServicePackages` | `serviceOfferingId: ID!` | `[ServicePackage!]!` | Member-vs-public | `resolvers/service/queries/getServicePackages.ts` |
+| `getBusinessLedger` | `businessId: ID!, limit: Int, before: Int` | `[LedgerEntry!]!` | Yes (active OWNER/MANAGER) | `resolvers/finance/queries/getBusinessLedger.ts` — statement, newest first. `before` is a **`seq`** cursor, not a date — see the `LedgerEntry` ordering warning in §9 |
+| `getBusinessFinancialSummary` | `businessId: ID!` | `BusinessFinancialSummary!` | Yes (active OWNER/MANAGER) | `resolvers/finance/queries/getBusinessFinancialSummary.ts` — balance, unpaid liability, available, and `jobsMissingPayCount` |
+| `getUnpaidEarningsByMember` | `businessId: ID!` | `[MemberEarningsSummary!]!` | Yes (active OWNER/MANAGER) | `resolvers/finance/queries/getUnpaidEarningsByMember.ts` — the payroll screen; omits members owed nothing, **includes deactivated members** |
+| `getBusinessEarnings` | `businessId: ID!, memberId: ID, unpaidOnly: Boolean, limit: Int` | `[EmployeeEarning!]!` | Yes (active OWNER/MANAGER) | `resolvers/finance/queries/getBusinessEarnings.ts` — crosses sitters; `memberId` is always combined with `businessId` so a foreign member id returns nothing rather than leaking another tenant |
+| `getMyEarnings` | `businessId: ID!, unpaidOnly: Boolean, limit: Int` | `[EmployeeEarning!]!` | Yes (**any** active member) | `resolvers/finance/queries/getMyEarnings.ts` — the one finance query an EMPLOYEE may call; `memberId` comes from the caller's own membership and can't be redirected by an argument |
 
 ### Declared Mutations
 
@@ -991,6 +1118,7 @@ behavior sections below), not root operations.
 | `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (active OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
 | `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` — sets `isActive` to `false`; does not delete the row |
 | `setAvailability`   | `SetAvailabilityInput`   | `[EmployeeAvailability!]!` | Yes (the member themselves, **or** an active OWNER/MANAGER of their business) | `resolvers/business/mutations/setAvailability.ts` — the write side for `getAvailableEmployees`. Partial by day; upserts each day against `(employeeId, dayOfWeek)` in one `$transaction`. Returns the member's full week (Monday→Sunday), not just the days that changed |
+| `setMemberPayRate`  | `SetMemberPayRateInput`  | `BusinessMember!`  | Yes (active **OWNER** only) | `resolvers/business/mutations/setMemberPayRate.ts` — sets `BusinessMember.payRatePercent`; `null` clears it so the business default applies. Stricter than `removeMember` on purpose: nothing else would stop a MANAGER raising their own pay. Read-forward only — never restates accrued earnings |
 | `addPet`            | `AddPetInput`            | `Pet!`             | Yes (JWT + CustomerProfile) | `resolvers/customer/mutations/addPet.ts` — resolves the caller's `CustomerProfile` from the JWT, then creates the pet scoped to that `customerId` |
 | `updatePet`         | `UpdatePetInput`         | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/updatePet.ts` — returns 404 (NOT_FOUND) rather than FORBIDDEN if the `petId` belongs to another customer, to avoid confirming a pet ID exists cross-account |
 | `deletePet`         | `petId: ID!`             | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/deletePet.ts` — same 404-on-mismatch pattern as `updatePet`; sets `isActive` to `false` (soft delete), does not destroy the row |
@@ -1014,6 +1142,8 @@ behavior sections below), not root operations.
 | `createServicePackage` | `CreateServicePackageInput` | `ServicePackage!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/createServicePackage.ts` — `sessionsCount` defaults to `1` when omitted |
 | `updateServicePackage` | `UpdateServicePackageInput` | `ServicePackage!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/updateServicePackage.ts` — partial update |
 | `deleteServicePackage` | `servicePackageId: ID!` | `ServicePackage!` | Yes (active OWNER/MANAGER) | `resolvers/service/mutations/deleteServicePackage.ts` — soft delete |
+| `addTip`            | `AddTipInput`            | `Job!`             | Yes (the job's customer, job `COMPLETED`) | `resolvers/job/mutations/addTip.ts` — writes `Job.tipAmount`, credits the ledger, and accrues the tip **in full** to the assigned sitter, in one transaction. **One tip per job, final** — no edit or reversal |
+| `recordPayout`      | `RecordPayoutInput`      | `Payout!`          | Yes (active **OWNER** only) | `resolvers/finance/mutations/recordPayout.ts` — creates a `PAID` payout, claims the sitter's unpaid earnings, and debits the ledger in one `Serializable` transaction. Amount is **summed from the claimed earnings, never from input**. No reversal exists |
 
 ### GraphQL Input Types
 
@@ -1027,7 +1157,8 @@ behavior sections below), not root operations.
 | `UpdateUserInput` | `firstName?`, `lastName?`, `phone?`, `avatarUrl?` | Requires at least one field. Phone must match the phone pattern and `avatarUrl` must be a URL. Although the resolver has empty-value clearing branches, current Zod validation rejects empty strings for these fields. |
 | `ChangePasswordInput` | `currentPassword`, `newPassword` | New password must meet the registration password rules and differ from the current one. |
 | `ChangeEmailInput` | `newEmail`, `password` | Confirms the password and normalizes the new email to lowercase. |
-| `UpdateBusinessInput` | `businessId`, `name?`, `description?` | Requires a UUID business ID and at least one update field. Empty `description` clears the stored value. |
+| `UpdateBusinessInput` | `businessId`, `name?`, `description?`, `defaultSitterPayPercent?` | Requires a UUID business ID and at least one update field. Empty `description` clears the stored value; `null` `defaultSitterPayPercent` clears the business-wide pay default. The percent is 0–100 with at most 2 decimals. |
+| `SetMemberPayRateInput` | `businessId`, `memberId`, `payRatePercent` | `memberId` is a `BusinessMember.id`. `payRatePercent` is required but nullable — `null` clears the member's override so the business default applies. 0–100, max 2 decimals. |
 | `SetBusinessLocationInput` | `businessId`, `latitude`, `longitude` | Zod schema (`setBusinessLocationSchema`) reuses the same lat/lng bounds as `getNearbyBusinessesSchema`. |
 | `RemoveMemberInput` | `businessId`, `memberId` | Both IDs must be UUIDs; `memberId` identifies a `BusinessMember`, not a `User`. |
 | `AvailabilitySlotInput` | `dayOfWeek`, `startTime?`, `endTime?`, `isAvailable?` | `dayOfWeek` is `MONDAY`…`SUNDAY`. Times are zero-padded 24-hour `HH:MM` and **required unless `isAvailable` is false**; `endTime` must be after `startTime` (object-level `.refine()`). `isAvailable` defaults to `true`. |
@@ -1038,6 +1169,8 @@ behavior sections below), not root operations.
 | `CreateBookingInput` | `businessId`, `serviceOfferingId`, `servicePackageId?`, `addOnIds?`, `petIds`, `sessions`, `specialInstructions?`, `accessCode?` | Zod schema (`createBookingSchema`) validates shapes/UUIDs; the resolver cross-checks against the DB that `sessions.length` matches the package's `sessionsCount` (or is exactly 1 for an ad-hoc booking with no package), that all `addOnIds` belong to the offering and are active, and that all `petIds` belong to the caller and are active. |
 | `AssignSitterInput` | `jobId`, `assigneeId` | Both UUIDs. `assigneeId` is the `BusinessMember.id`, not the `User.id` — same convention as `RemoveMemberInput.memberId`. |
 | `CancelJobInput` | `jobId`, `reason?` | Zod schema (`cancelJobSchema`). `reason` is optional but must be non-empty when present — an all-whitespace string is a mistake, not a deliberate blank. Max 500 chars. |
+| `AddTipInput` | `jobId`, `amount` | Zod schema (`addTipSchema`). `amount` is a positive dollar figure, max 2 decimals, capped at `$1000` as a fat-finger guard (tunable — not a DB limit). |
+| `RecordPayoutInput` | `businessId`, `memberId`, `throughDate?`, `method?`, `note?` | Zod schema (`recordPayoutSchema`). **Deliberately has no `amount`** — the payout total is summed from the earnings it settles, so it can never disagree with its own line items. `throughDate` is an ISO date-time bounding the settlement (payroll cutoff); omit to settle everything outstanding. |
 | `LeaveReviewInput` | `jobId`, `rating`, `comment?`, `tags?` | Zod schema (`leaveReviewSchema`) requires `rating` between 1–5. `businessId`/`customerId` are deliberately not accepted — both are derived from the job. `tags` defaults to `[]` if omitted. |
 | `PostJobUpdateInput` | `jobId`, `note?`, `photoUrl?` | Zod schema (`postJobUpdateSchema`) requires at least one of `note`/`photoUrl` (object-level `.refine()`). |
 | `SubmitReportCardInput` | `jobId`, all other fields optional | Zod schema (`submitReportCardSchema`). `mood` must be a valid `PetMood` enum value if provided; omitted fields fall back to the model's Prisma defaults (`peeCount`/`poopCount` → `0`, the boolean flags → `false`). |
@@ -1067,7 +1200,7 @@ behavior sections below), not root operations.
 | `AuthPayload`      | `token: String!, user: User!`               | Returned by `registerCustomer`, `login`, `acceptInvitation` |
 | `OwnerAuthPayload` | `token: String!, user: User!, business: Business!` | Returned by `registerOwner`       |
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
-| `BusinessMember`   | `id, role, isActive, joinedAt, user: User!, availability: [EmployeeAvailability!]!` | Returned by `getBusinessMembers`, `removeMember`. `availability` is a lazily-resolved type-level field (`resolvers/business/businessResolvers.ts`), so it costs nothing on queries that don't request it and works anywhere a `BusinessMember` appears — including nested under `EmployeeAvailabilityStatus.member` on the assign-sitter screen |
+| `BusinessMember`   | `id, role, isActive, joinedAt, user: User!, payRatePercent?, availability: [EmployeeAvailability!]!` | Returned by `getBusinessMembers`, `removeMember`, `setMemberPayRate`. `availability` is a lazily-resolved type-level field (`resolvers/business/businessResolvers.ts`), so it costs nothing on queries that don't request it and works anywhere a `BusinessMember` appears — including nested under `EmployeeAvailabilityStatus.member` on the assign-sitter screen. `payRatePercent` is **gated** by a type-level resolver (null unless the caller is that member or an active OWNER/MANAGER) — without it, a sitter could read a colleague's pay through exactly that nested path |
 | `EmployeeAvailability` | All `EmployeeAvailability` model fields | Returned by `setAvailability` and `BusinessMember.availability`, ordered Monday→Sunday (Postgres sorts enum columns by declaration order, and `DayOfWeek` is declared MONDAY-first). No field resolvers needed |
 | `Pet`              | All `Pet` model fields including `isActive` | Returned by `getMyPets`, `addPet`, `updatePet`, `deletePet`. `weightLb` is `Float?`; the underlying Prisma `Decimal` must be converted with `Number()` in resolvers before returning. |
 | `Job`              | Nearly all `Job` model fields, plus lazy `pets`, `customer: CustomerProfile!`, `service: ServiceOffering!`, `assignee: BusinessMember` | `price` and `tipAmount` are `Float`/`Float?` resolved via type-level field resolvers (`Number()` conversion from Prisma `Decimal`). `pets`/`customer`/`service`/`assignee` are resolved lazily (own queries keyed off the parent, not `include`s) — the display relations list screens need ("Alex R. · Biscuit · Walk"). `accessCode` is resolved via a gated field resolver — see `Job Resolver Behavior` below; it is **not** a plain passthrough field. `status` is a raw `String!` (not a GraphQL enum) covering all seven `JobStatus` values including `DECLINED`. |
@@ -1076,6 +1209,11 @@ behavior sections below), not root operations.
 | `BookingAddOn`     | `id, priceAtBooking, addOn: ServiceOfferingAddOn!` | `priceAtBooking` is `Float!` via a type-level resolver (snapshotted add-on price at purchase time, independent of the add-on's current price). |
 | `Review`           | All `Review` model fields | Returned by `leaveReview`, `getBusinessReviews`. No `customer`/`user` field — the reviewer's name isn't exposed anywhere on this type yet. |
 | `JobUpdate`        | All `JobUpdate` model fields | Returned by `postJobUpdate`. No plain field resolvers needed (no Decimal fields, nothing sensitive). |
+| `LedgerEntry`      | `id, seq, entryType, amount, balanceAfter, currency, referenceType, description?, createdAt, job?, payout?` | Returned by `getBusinessLedger`. `amount`/`balanceAfter` are `Float!` via type-level resolvers; `job`/`payout` resolve lazily. `entryType`/`referenceType` are raw `String!`, not GraphQL enums, matching `Job.status`. |
+| `EmployeeEarning`  | `id, type, amount, ratePercent?, basisAmount?, isPaid, description?, createdAt, job?, member: BusinessMember!, payout?` | `isPaid` is **derived** (`payoutId != null`), not a stored column — there's no status field to drift out of step with the payout. `ratePercent`/`basisAmount` are the snapshotted rule behind `amount`. |
+| `Payout`           | `id, amount, status, method?, note?, paidAt?, createdAt, member: BusinessMember!, earnings: [EmployeeEarning!]!` | Returned by `recordPayout`. `status` is always `PAID` today. |
+| `BusinessFinancialSummary` | `currentBalance, unpaidEarningsTotal, availableBalance, jobsMissingPayCount` | Computed by `getBusinessFinancialSummary`; not backed by a model. `availableBalance` can be negative and is deliberately not clamped. |
+| `MemberEarningsSummary` | `member: BusinessMember!, unpaidTotal, unpaidCount` | Computed by `getUnpaidEarningsByMember` via a Prisma `groupBy`; not backed by a model. |
 | `ReportCard`       | All `ReportCard` model fields | Returned by `submitReportCard`. `mood` is a raw `String` (not a GraphQL enum), matching the `PetType`/`PetSex`/`JobStatus` convention elsewhere. |
 | `EmployeeAvailabilityStatus` | `member: BusinessMember!, isAvailable: Boolean!, conflictReason: String` | Not a Prisma model — a computed shape returned only by `getAvailableEmployees`. `member` already carries its `user` relation (fetched via the same `include: { user: true }` pattern as `getBusinessMembers`), so no extra field resolver is needed for it. |
 | `ServiceOffering`  | `id, businessId, title, category?, description, basePrice?, durationMinutes, features, isActive, addOns: [ServiceOfferingAddOn!]!, packages: [ServicePackage!]!` | Also reachable nested via `Job.service`. `basePrice` converts Decimal→Number via the type-level map in `serviceResolvers.ts`; `addOns`/`packages` resolve lazily there too, applying the same member-vs-public visibility filter as `getServiceAddOns`/`getServicePackages` (see `Service Resolver Behavior` in §10). |
@@ -1301,6 +1439,64 @@ offering **active by default** — a deliberate contrast with `registerOwner`'s 
 are created inactive since they're placeholders the owner hasn't configured yet, not something a
 caller explicitly asked to publish.
 
+### Finance Resolver Behavior
+
+Registered through `resolvers/finance/`. **Every write to `LedgerEntry` and `EmployeeEarning` goes
+through `src/utils/ledger.ts`** — no resolver touches those tables directly, because the invariants
+below are only enforceable with one path in. If you add a financial write, add it there.
+
+`src/utils/ledger.ts` exports:
+
+- **`appendLedgerEntry`** — the only way to write a `LedgerEntry`. Reads the previous balance
+  (ordered by `seq`) and appends a row carrying the new one. `amount` is always positive;
+  `entryType` carries direction. Must run inside `runSerializable`.
+- **`runSerializable`** — wraps a `$transaction` at `Serializable` isolation and retries up to 3× on
+  a serialization failure (Prisma `P2034` / SQLSTATE `40001`), converting an exhausted retry into a
+  `CONFLICT` GraphQL error. The callback may run more than once, so it must not perform side effects
+  outside the transaction.
+- **`recordJobCompletionFinancials`** — called by **both** `clockOut` and `completeJob`, in the same
+  transaction as the status change.
+- **`recordTipFinancials`** — called by `addTip`.
+- **`settleEarningsIntoPayout`** — called by `recordPayout`.
+
+**Sitter pay resolution.** Rate is `BusinessMember.payRatePercent ?? Business.defaultSitterPayPercent`,
+applied to **`Job.price`** — the per-session service price only, deliberately excluding the flat
+`Business.serviceFeeAmount` and any booking add-ons, neither of which is attributed to an individual
+job. (Add-on revenue currently belongs to no job at all; a percentage cut silently excludes it. If
+sitters should be paid for add-on work, add-ons need per-job attribution first.) The resolved rate
+and basis are snapshotted onto the earning row.
+
+> **A missing pay rate is not an error.** If neither rate is set, the job still completes and simply
+> accrues nothing — refusing to let a sitter finish work because payroll isn't configured is worse
+> than a missing accrual, which an owner can settle later with a `BONUS`/`ADJUSTMENT` earning. The
+> cost is that the gap is *silent*, which is exactly what `getBusinessFinancialSummary`'s
+> `jobsMissingPayCount` exists to surface. Don't "fix" this by throwing.
+
+**Cash basis.** An earning accruing does **not** debit the ledger; only a `recordPayout` does. This
+keeps `balanceAfter` meaning "cash recorded as taken in" rather than an accrual figure, and makes the
+dashboard's three numbers independently meaningful. `availableBalance` may go negative — that means
+more is owed to sitters than the business has recorded taking in, and is deliberately not clamped.
+
+> A `JOB_PAYMENT` credit is **revenue recognition, not proof a card was charged.** There is no
+> payment processor (see *Planned, Not Yet Designed*). A ledger balance is not collected money.
+
+**Concurrency.** `clockOut`, `completeJob`, and `addTip` all re-read the job's status *inside* the
+transaction rather than trusting the check made outside it — a sitter clocking out while a manager
+overrides could otherwise both pass. `addTip`'s in-transaction re-read of `tipAmount` is
+load-bearing in a way the others' aren't: `EmployeeEarning` has the `(jobId, type)` unique constraint
+behind it, but **the ledger has no equivalent**, so nothing at the DB level would stop a second `TIP`
+credit.
+
+**`recordPayout`** claims earnings with a conditional `updateMany` filtered on `payoutId: null` whose
+affected-row count must equal what was read. Serializable should already make two concurrent payouts
+conflict; this check doesn't depend on that, so a double-claim aborts even at a weaker level.
+Deactivated members can still be paid — removing someone doesn't discharge what they earned, and
+blocking it would strand the money permanently.
+
+**Known gap:** there is no payout reversal. A mistaken `recordPayout` cannot be voided — that needs
+a compensating ledger entry plus a rule for whether the sitter was actually paid. Correct a mistake
+with an `ADJUSTMENT` earning for now.
+
 ### Scalar Types
 
 | Scalar | Package             | Purpose                      |
@@ -1351,8 +1547,19 @@ caller explicitly asked to publish.
 
 ### Financial Ledger
 - **Never** update a balance in place — always append a new `LedgerEntry`
-- Derive current balance from `findFirst({ orderBy: { createdAt: 'desc' } }).balanceAfter`
-- Wrap all payment operations in `prisma.$transaction({ isolationLevel: Serializable })` with retry logic
+- Derive current balance from `findFirst({ orderBy: { seq: 'desc' } }).balanceAfter` — **`seq`, not
+  `createdAt`**. Entries appended in one transaction share a `createdAt`, so ordering by it picks
+  between them arbitrarily and silently corrupts the running balance.
+- Wrap all payment operations in `prisma.$transaction({ isolationLevel: Serializable })` with retry
+  logic — use `runSerializable` from `src/utils/ledger.ts` rather than hand-rolling it
+- Route every write to `LedgerEntry`/`EmployeeEarning` through `src/utils/ledger.ts`; nothing else
+  should touch those tables
+- Money reaches a `Decimal` column as a fixed-2dp string (`value.toFixed(2)`) or a `Prisma.Decimal`,
+  never a raw float; arithmetic on money uses `Prisma.Decimal` methods, not JS `+`/`*`
+- Validate any new money or percentage input with `hasAtMostTwoDecimals` in `utils/validate.ts`.
+  Do **not** re-derive it as `Number.isInteger(value * 100)` — that form wrongly rejects ~11% of
+  legitimate two-decimal values (`19.99 * 100` is `1998.9999999999998`), which was a live bug on
+  `basePrice`/`pricePerSession` until it was fixed.
 
 ### Planned, Not Yet Designed
 
@@ -1367,10 +1574,14 @@ of the following exists until this section is updated:
   payment" screen — Growth $89/mo, staff limits) is planned but undesigned; whether plan/tier data
   lives in this schema or is delegated entirely to a billing provider (e.g. Stripe Billing) is not
   yet decided.
-- **Sitter payouts**: earnings are calculated **per completed job** (a sitter's cut of that job's
-  price), not a flat percentage or salary. There is no payout model yet — `LedgerEntry` is
-  business-scoped only, with no `BusinessMember`-scoped equivalent. Design the payout ledger when
-  this is built, following the same append-only philosophy as `LedgerEntry`.
+- **Payout reversal**: `recordPayout` has no inverse. Voiding one needs a compensating ledger entry
+  plus a rule for whether the sitter was actually paid, neither of which is designed. Same for tip
+  correction — `addTip` is one-shot and final, because a tip can be paid out minutes after it lands.
+- **Partial/selective payouts**: `recordPayout` settles everything outstanding, optionally bounded by
+  `throughDate`. Paying an arbitrary subset of earnings isn't supported.
+- **Non-percentage pay models**: pay is a percentage of `Job.price` only. Hourly is plausible later
+  (`actualStartTime`/`actualEndTime` from clock-in/out are already recorded) but nothing reads them
+  for pay, and there is no flat-per-job or salary option.
 
 ---
 

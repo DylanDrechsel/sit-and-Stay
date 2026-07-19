@@ -1,4 +1,5 @@
 import { GraphQLError } from 'graphql';
+import { runSerializable, recordJobCompletionFinancials } from '../../../../utils/ledger.js';
 import type { GraphQLContext } from '../../../../types/context.js';
 
 /**
@@ -7,6 +8,11 @@ import type { GraphQLContext } from '../../../../types/context.js';
  * Clocks the assigned sitter out, finishing the job. Only the BusinessMember
  * assigned to this job (matching the caller's own membership) may call this.
  * Valid transition: IN_PROGRESS -> COMPLETED.
+ *
+ * Reaching COMPLETED also books the job's financials (ledger credit + sitter
+ * earning) in the SAME transaction as the status change — a completed job that
+ * accrued no pay would be invisible and have to be reconciled by hand. The other
+ * route to COMPLETED is completeJob, which must stay in step with this one.
  */
 export const clockOut = async (
     _: unknown,
@@ -49,8 +55,27 @@ export const clockOut = async (
         });
     }
 
-    return context.prisma.job.update({
-        where: { id: jobId },
-        data: { status: 'COMPLETED', actualEndTime: new Date() },
+    return runSerializable(context.prisma, async (tx) => {
+        // Re-read the status inside the transaction. The check above ran against
+        // a read taken outside it, so two concurrent clockOut calls could both
+        // have passed it; only this one is serialized against a competing write.
+        const fresh = await tx.job.findUnique({
+            where: { id: jobId },
+            select: { status: true },
+        });
+        if (fresh == null || fresh.status !== 'IN_PROGRESS') {
+            throw new GraphQLError('This job is no longer in progress.', {
+                extensions: { code: 'BAD_USER_INPUT' },
+            });
+        }
+
+        const updated = await tx.job.update({
+            where: { id: jobId },
+            data: { status: 'COMPLETED', actualEndTime: new Date() },
+        });
+
+        await recordJobCompletionFinancials(tx, updated);
+
+        return updated;
     });
 };

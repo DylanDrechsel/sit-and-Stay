@@ -32,7 +32,7 @@ export const updateBusiness = async (
         });
     }
 
-    const { businessId, name, description } = parsed.data;
+    const { businessId, name, description, defaultSitterPayPercent } = parsed.data;
 
     // Verify the caller is an OWNER or MANAGER of this business
     const membership = await context.prisma.businessMember.findUnique({
@@ -48,11 +48,23 @@ export const updateBusiness = async (
     }
 
     // Build the partial update payload — only include fields that were provided
-    const updateData: { name?: string; description?: string | null } = {};
+    const updateData: {
+        name?: string;
+        description?: string | null;
+        defaultSitterPayPercent?: string | null;
+    } = {};
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) {
         // Empty string explicitly clears the description
         updateData.description = description === '' ? null : description;
+    }
+    if (defaultSitterPayPercent !== undefined) {
+        // Written as a fixed-2dp string rather than a float, matching how
+        // createBooking writes money — the Decimal(5,2) column is the source of
+        // truth for precision and shouldn't inherit a float's representation.
+        // null here explicitly clears the default.
+        updateData.defaultSitterPayPercent =
+            defaultSitterPayPercent === null ? null : defaultSitterPayPercent.toFixed(2);
     }
 
     const updatedBusiness = await context.prisma.business.update({

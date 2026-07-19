@@ -15,23 +15,29 @@ Grab a valid JWT here instead of re-running `login`. **Tokens expire** (`JWT_EXP
 | Owner | owner.test1@petsitterpro.dev | TestPass123! | `0bfaff01-7e2f-4b60-811b-04b9909285ae` | `f6f86288-8cb4-4f08-a79d-7e1bdc2d9f6d` |
 | Manager | manager.test1@petsitterpro.dev | TestPass123! (phone since changed to `+12065559999` via §12) | `20be60f0-7d99-470c-ad24-e8ddd1314241` | `68081d4b-8bf9-4099-b6ec-2806cf8b1c5a` |
 | Employee | ~~employee.test1@petsitterpro.dev~~ → **employee.newemail@petsitterpro.dev** (changed via §40) | ~~TestPass123!~~ → **NewTestPass456!** (changed via §39) | `ca7aa688-4426-451c-8ed7-8b17babe0363` | `cc28c51f-3c59-4c44-9cea-cf881b468533` |
-| Customer | customer.test1@petsitterpro.dev | TestPass123! | `7065a3f9-aec6-4d66-a9f5-e05cf18392ac` | — (customer, not a `BusinessMember`) |
+| Customer | customer.test1@petsitterpro.dev | TestPass123! | `7065a3f9-aec6-4d66-a9f5-e05cf18392ac` | `8f024572-3ff9-4651-b4b8-d2979ab2f40a` — **also an active MANAGER** of this business (dual-role, from an earlier `cancelJob` union-of-roles test; not a clean "non-member" account) |
+| Outsider (throwaway) | outsider.test1@petsitterpro.dev | TestPass123! | `471565e6-4fb7-464a-9845-6cfc9715ffe9` | — (registered in §42 purely for true non-member negative tests; no business affiliation at all) |
 
 `BusinessMember.id` (not `User.id`) is what `assignSitter.assigneeId`, `setAvailability.memberId`, and
 `removeMember.memberId` all expect — keep this column in mind for the job-lifecycle phase.
 
-**Business:** Puget Sound Pet Care — `eeed145f-246b-4c14-8b1a-246850d1ea8a` (⚠️ **deactivated** via §41 — `isActive: false` as of the final test pass)
+**Business:** Puget Sound Pet Care — `eeed145f-246b-4c14-8b1a-246850d1ea8a` (reactivated after §41;
+`isActive: true` as of §42). `defaultSitterPayPercent: 50`. Employee `cc28c51f-3c59-4c44-9cea-cf881b468533`
+has a `payRatePercent` override of `70`. Current ledger balance after §42: **$22.50**.
 
-**Current JWTs** (use as `Authorization: Bearer <token>`):
+**Current JWTs** (use as `Authorization: Bearer <token>`) — all five re-logged-in/registered fresh
+for the §42 finance testing pass; the tokens previously logged here had expired:
 
-- **Owner** (fresh login, this session):
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwYmZhZmYwMS03ZTJmLTRiNjAtODExYi0wNGI5OTA5Mjg1YWUiLCJlbWFpbCI6Im93bmVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDQ3OTI4NSwiZXhwIjoxNzg0NTY1Njg1fQ.5Ba5U0-k4VbyHskAwqiFlWqsMTyTGpVf6Y2G3A7VDMs`
-- **Manager** (fresh login, this session):
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyMGJlNjBmMC03ZDk5LTQ3MGMtYWQyNC1lOGRkZDEzMTQyNDEiLCJlbWFpbCI6Im1hbmFnZXIudGVzdDFAcGV0c2l0dGVycHJvLmRldiIsImdsb2JhbFJvbGUiOiJVU0VSIiwiaWF0IjoxNzg0NDc5Mjg1LCJleHAiOjE3ODQ1NjU2ODV9.n2EMkltVhKyKRx6OR1LBAPwrfBAdpVCVwatyGEkknXM`
-- **Employee** (fresh login, this session):
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjYTdhYTY4OC00NDI2LTQ1MWMtOGVkNy04YjE3YmFiZTAzNjMiLCJlbWFpbCI6ImVtcGxveWVlLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDQ3OTI4NSwiZXhwIjoxNzg0NTY1Njg1fQ.D6IvGX4aQkoFPfEqjN11rHDe2l2rw8xUBiNIJ3XQeO4`
-- **Customer** (from §3 registration — not re-logged-in this round):
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3MDY1YTNmOS1hZWM2LTRkNjYtYTlmNS1lMDVjZjE4MzkyYWMiLCJlbWFpbCI6ImN1c3RvbWVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDQ3NzYwMywiZXhwIjoxNzg0NTY0MDAzfQ.WDLKWjVSBAn4_IdO7aFOiGIy0H0PFRoYUhbBiKsP1IY`
+- **Owner**:
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwYmZhZmYwMS03ZTJmLTRiNjAtODExYi0wNGI5OTA5Mjg1YWUiLCJlbWFpbCI6Im93bmVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjU0MCwiZXhwIjoxNzg0NTg4OTQwfQ.KTf3p5IxKsI1B2IqYc7XQjRp66rcNRYQ4oiP1FKoxEI`
+- **Manager**:
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyMGJlNjBmMC03ZDk5LTQ3MGMtYWQyNC1lOGRkZDEzMTQyNDEiLCJlbWFpbCI6Im1hbmFnZXIudGVzdDFAcGV0c2l0dGVycHJvLmRldiIsImdsb2JhbFJvbGUiOiJVU0VSIiwiaWF0IjoxNzg0NTAyNTQxLCJleHAiOjE3ODQ1ODg5NDF9.8cj504vvFGjC05_EYA6EVATYBd0nMctzQQT4Bidk6kE`
+- **Employee**:
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjYTdhYTY4OC00NDI2LTQ1MWMtOGVkNy04YjE3YmFiZTAzNjMiLCJlbWFpbCI6ImVtcGxveWVlLm5ld2VtYWlsQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjU0MSwiZXhwIjoxNzg0NTg4OTQxfQ.8i0LfbGAroGZFS7maIisfCxTXB6qXIRxwu1J_PLu0uk`
+- **Customer**:
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3MDY1YTNmOS1hZWM2LTRkNjYtYTlmNS1lMDVjZjE4MzkyYWMiLCJlbWFpbCI6ImN1c3RvbWVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjU0MSwiZXhwIjoxNzg0NTg4OTQxfQ.budbTB7th10JOp_fRnOeqoXy9ONe7zs-JpDSKSQ-X58`
+- **Outsider** (throwaway, registered in §42):
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI0NzE1NjVlNi00ZmI3LTQ2NGEtOTg0NS02Y2ZjOTcxNWZmZTkiLCJlbWFpbCI6Im91dHNpZGVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjgxMiwiZXhwIjoxNzg0NTg5MjEyfQ.CK5_5PBGuMlTfeiTRUzNktUW21FYGVg1iylj9Qk-9pU`
 
 ---
 
@@ -50,6 +56,13 @@ section below. Grouped by resolver domain (`src/graphQL/resolvers/<domain>/`).
 
 **customer**
 - [x] getMyPets
+
+**finance**
+- [x] getBusinessLedger
+- [x] getBusinessFinancialSummary
+- [x] getUnpaidEarningsByMember
+- [x] getBusinessEarnings
+- [x] getMyEarnings
 
 **job**
 - [x] getAvailableEmployees
@@ -106,6 +119,10 @@ section below. Grouped by resolver domain (`src/graphQL/resolvers/<domain>/`).
 - [x] deactivateBusiness
 - [x] removeMember
 - [x] setAvailability
+- [x] setMemberPayRate
+
+**finance**
+- [x] recordPayout
 
 **service**
 - [x] createServiceOffering
@@ -127,6 +144,7 @@ section below. Grouped by resolver domain (`src/graphQL/resolvers/<domain>/`).
 - [x] clockOut
 - [x] completeJob
 - [x] cancelJob
+- [x] addTip
 
 **review**
 - [x] leaveReview
@@ -2408,5 +2426,309 @@ Business deactivated: Puget Sound Pet Care — `eeed145f-246b-4c14-8b1a-246850d1
 
 ### Notes
 - **Worth knowing**: a nonexistent `businessId` gives the exact same `FORBIDDEN` "Only the business owner can deactivate a business." as a real business you're not the owner of — the resolver checks "is the caller an active OWNER of this businessId" first, and a made-up ID simply never matches any membership row, so it falls into the same bucket rather than a distinct `NOT_FOUND`. Consistent with the "don't confirm whether something exists" pattern used elsewhere in this codebase, just via `FORBIDDEN` instead of `NOT_FOUND` this time.
-- **This closes out every query and mutation in the schema** — all 57 (20 queries + 37 mutations) have now been exercised against a running server at least once, with negative-path coverage on the ones that have interesting failure modes. See the Test Coverage Checklist at the top of this file.
+- **This closed out every query and mutation that existed at the time** — 57 (20 queries + 37 mutations). The finance domain added below is new work from a later session.
+
+---
+
+## 42. Employee Pay & Payouts — Finance Domain
+
+A new session's worth of testing, covering the 8 operations added by the finance feature (5
+queries, 3 mutations): `getBusinessLedger`, `getBusinessFinancialSummary`,
+`getUnpaidEarningsByMember`, `getBusinessEarnings`, `getMyEarnings`, `setMemberPayRate`, `addTip`,
+`recordPayout`. Run against the same business (`eeed145f-246b-4c14-8b1a-246850d1ea8a`, reactivated
+since §41) and the same four accounts, re-logged-in for fresh tokens. One new throwaway account,
+**Outsider** (`outsider.test1@petsitterpro.dev` / `TestPass123!`, `User.id`
+`471565e6-4fb7-464a-9845-6cfc9715ffe9`), was registered specifically for non-member negative tests
+— `customer.test1` turned out to already be a dual-role active **MANAGER** of this business from an
+earlier test (§ around the `cancelJob` union-of-roles coverage), so it doesn't exercise a true
+"outsider" path.
+
+Two pre-existing jobs from the original test pass, `43fcc471-e464-42ef-9646-ccad64104d1b` and
+`0cca260f-0f92-4e94-aec1-72435aac7cba`, were already `COMPLETED` (with an assignee, price `20`)
+**before this feature existed**, so they have no `JOB_PAY` earning — these are exactly what
+`jobsMissingPayCount` is supposed to catch, and are referred to below as "the two legacy jobs."
+
+### 42.1 Baseline reads (before any pay rate configured)
+
+**Queries:** `getBusinessFinancialSummary`, `getBusinessLedger`, `getUnpaidEarningsByMember`,
+`getBusinessEarnings`, `getMyEarnings` — all called once against the business in its
+pre-feature state.
+
+```json
+{"data":{"getBusinessFinancialSummary":{"currentBalance":0,"unpaidEarningsTotal":0,"availableBalance":0,"jobsMissingPayCount":2}}}
+{"data":{"getBusinessLedger":[]}}
+{"data":{"getUnpaidEarningsByMember":[]}}
+{"data":{"getBusinessEarnings":[]}}
+{"data":{"getMyEarnings":[]}}
+```
+
+`jobsMissingPayCount: 2` on the very first call, with zero other finance data existing yet,
+confirms it's really counting the two legacy jobs and not something that only appears after other
+data is written.
+
+### Negative cases tested (access control, all 5 queries)
+
+| Scenario | Result |
+|----------|--------|
+| `getBusinessFinancialSummary` as active EMPLOYEE | `FORBIDDEN` — "You do not have permission to view this business's finances." |
+| `getBusinessEarnings` unauthenticated (no token) | `UNAUTHENTICATED` — "You must be logged in." |
+| `getBusinessLedger` as true Outsider (no membership at all) | `FORBIDDEN` — same message as above |
+| `getUnpaidEarningsByMember` as true Outsider | `FORBIDDEN` — same message |
+| `getMyEarnings` as true Outsider | `FORBIDDEN` — "You are not a member of this business." (distinct message — `requireActiveMembership`, not `requireFinanceManager`) |
+| `getMyEarnings` as active MANAGER (any role allowed) | **Not an error** — `[]`. Confirms the "any active member" rule isn't accidentally OWNER/MANAGER-gated |
+| `getBusinessLedger` with a non-UUID `businessId` | `BAD_USER_INPUT` — "Invalid business ID" |
+| `getBusinessLedger` with cursor `before: 0` | `BAD_USER_INPUT` — "Cursor must be greater than 0" (Zod `.positive()`) |
+
+### Notes
+- First attempt at the "non-member" negative tests used `customer.test1`'s token and got `[]`
+  instead of `FORBIDDEN` on both `getBusinessLedger` and `getMyEarnings` — looked like a bug at
+  first glance. Checked `getBusinessMembers` before concluding anything: `customer.test1` is
+  genuinely an active `MANAGER` of this business (`8f024572-3ff9-4651-b4b8-d2979ab2f40a`), set up in
+  an earlier session for the `cancelJob` dual-role test. Not a bug — a bad test account choice.
+  Registered the Outsider account and re-ran; both correctly returned `FORBIDDEN`.
+
+---
+
+### 42.2 Configuring Pay Rates — `updateBusiness.defaultSitterPayPercent`, `setMemberPayRate`
+
+### Input
+
+```graphql
+mutation($input: UpdateBusinessInput!) { updateBusiness(input: $input) { id defaultSitterPayPercent } }
+mutation($input: SetMemberPayRateInput!) { setMemberPayRate(input: $input) { id payRatePercent } }
+```
+
+**Variables:**
+```json
+{ "input": { "businessId": "eeed145f-246b-4c14-8b1a-246850d1ea8a", "defaultSitterPayPercent": 50 } }
+{ "input": { "businessId": "eeed145f-246b-4c14-8b1a-246850d1ea8a", "memberId": "cc28c51f-3c59-4c44-9cea-cf881b468533", "payRatePercent": 70 } }
+```
+
+### Response
+
+```json
+{"data":{"updateBusiness":{"id":"eeed145f-246b-4c14-8b1a-246850d1ea8a","defaultSitterPayPercent":50}}}
+{"data":{"setMemberPayRate":{"id":"cc28c51f-3c59-4c44-9cea-cf881b468533","payRatePercent":70}}}
+```
+
+Business-wide default set to 50%; the employee's own override (70%) was then confirmed to win over
+it for every job completion below.
+
+### Key IDs
+Business default: 50%. Employee (`cc28c51f-3c59-4c44-9cea-cf881b468533`) override: 70%.
+
+### Negative cases tested
+
+| Scenario | Result |
+|----------|--------|
+| `updateBusiness` with `defaultSitterPayPercent: 150` | `BAD_USER_INPUT` — "Pay percent cannot exceed 100" |
+| `updateBusiness` with `defaultSitterPayPercent: 33.333` (3 decimals) | `BAD_USER_INPUT` — "Pay percent supports at most 2 decimal places" |
+| `setMemberPayRate` as active MANAGER | `FORBIDDEN` — "Only the business owner can set pay rates." |
+| `setMemberPayRate` as the EMPLOYEE themselves (self-service) | `FORBIDDEN` — same message; **OWNER only, no self-exception** |
+
+### `BusinessMember.payRatePercent` / `Business.defaultSitterPayPercent` visibility gate
+
+| Scenario | Result |
+|----------|--------|
+| Employee views their own `payRatePercent` (via `getBusinessMembers`) | `70` — self-view works |
+| MANAGER views the employee's `payRatePercent` | `70` — MANAGER can read pay, even though only OWNER can write it |
+| `defaultSitterPayPercent` via public `getNearbyBusinesses` (unauthenticated) | `null` — confirms the raw-SQL storefront path never leaks it, even for this business's own owner browsing anonymously |
+
+### Notes
+- Didn't have a second employee to test the actual leak scenario (sitter reading a *colleague's*
+  rate) — the coverage here is self-view + manager-view + the public-path null, which confirms the
+  gate discriminates correctly on the paths available, but isn't exhaustive.
+
+---
+
+### 42.3 Job Completion Financials — both paths to `COMPLETED`
+
+Two fresh bookings (Jobs A and B, Dog Walking @ $25) were driven through the two different routes to
+`COMPLETED` specifically because `recordJobCompletionFinancials` is called from both and has to stay
+in step:
+
+- **Job A** (`5fbb35bc-2f21-4e46-864a-5e72358e312c`): `acceptJob` → `assignSitter` → `clockIn` →
+  **`clockOut`**
+- **Job B** (`a5e42fa2-5892-4bce-808c-26cc9f0ef27f`): `acceptJob` → `assignSitter` →
+  **`completeJob`** (manual override, clock-in skipped entirely)
+
+### Response (clockOut on Job A)
+
+```json
+{"data":{"clockOut":{"id":"5fbb35bc-2f21-4e46-864a-5e72358e312c","status":"COMPLETED","actualEndTime":"2026-07-19T23:15:37.407Z"}}}
+```
+
+```json
+{"data":{"getBusinessEarnings":[{"id":"ee81ec80-d2ea-41e7-98f8-ea74f53051a9","type":"JOB_PAY","amount":17.5,"ratePercent":70,"basisAmount":25,"isPaid":false,"job":{"id":"5fbb35bc-2f21-4e46-864a-5e72358e312c"},"member":{"id":"cc28c51f-3c59-4c44-9cea-cf881b468533"}}]}}
+{"data":{"getBusinessLedger":[{"seq":1,"entryType":"CREDIT","amount":25,"balanceAfter":25,"referenceType":"JOB_PAYMENT","job":{"id":"5fbb35bc-2f21-4e46-864a-5e72358e312c"}}]}}
+```
+
+$25 × 70% = $17.50, exactly as designed — the employee's override rate, not the business's 50%
+default, and `Job.price` ($25) alone as the basis (no service fee or add-ons in this booking to
+confirm the exclusion against, but none were added to the total either).
+
+### Response (completeJob on Job B, clock-in skipped)
+
+```json
+{"data":{"completeJob":{"id":"a5e42fa2-5892-4bce-808c-26cc9f0ef27f","status":"COMPLETED","actualStartTime":"2026-07-19T23:15:49.282Z","actualEndTime":"2026-07-19T23:15:49.282Z"}}}
+```
+
+`actualStartTime` backfilled to the same instant as `actualEndTime` (clock-in never happened, as
+expected). Produced an identical second `JOB_PAY` earning (`17.5`, `ratePercent: 70`) — confirming
+both completion paths book financials identically.
+
+### Key IDs
+Job A: `5fbb35bc-2f21-4e46-864a-5e72358e312c`. Job B: `a5e42fa2-5892-4bce-808c-26cc9f0ef27f`.
+
+### Negative cases tested
+
+| Scenario | Result |
+|----------|--------|
+| `clockOut` on Job A again (already `COMPLETED`) | `BAD_USER_INPUT` — "Cannot clock out from this job's current status (COMPLETED)." |
+| `completeJob` on Job B again (already `COMPLETED`) | `BAD_USER_INPUT` — "Cannot complete a job from its current status (COMPLETED)." |
+
+### Notes
+- After both completions, `getBusinessFinancialSummary` read `currentBalance: 50, unpaidEarningsTotal: 35, availableBalance: 15, jobsMissingPayCount: 2` — the two new jobs correctly did **not** add to `jobsMissingPayCount` (they got paid), and the count stayed pinned to the two legacy jobs, not incremented by every completed job in the system.
+- The re-completion negative tests hit the **outer** status check (run before the transaction opens) rather than the in-transaction re-check — expected, since there's no concurrent request racing them here. The in-transaction re-check exists for the race window specifically; see 42.4 for a test that actually exercises it.
+
+---
+
+### 42.4 Tips — `addTip`
+
+### Input
+
+```graphql
+mutation($input: AddTipInput!) { addTip(input: $input) { id tipAmount } }
+```
+
+**Variables:** `{ "input": { "jobId": "5fbb35bc-2f21-4e46-864a-5e72358e312c", "amount": 5.50 } }`
+
+### Response
+
+```json
+{"data":{"addTip":{"id":"5fbb35bc-2f21-4e46-864a-5e72358e312c","tipAmount":5.5}}}
+```
+
+Also tipped Job B ($3.00) and one of the two **legacy** completed jobs, `43fcc471-...` ($2.25) — the
+legacy-job tip specifically confirms `recordTipFinancials` works independent of
+`recordJobCompletionFinancials` (that job was completed in an earlier session, long before this
+feature existed, and had no `JOB_PAY` earning at all).
+
+### Key IDs
+Tipped: Job A ($5.50), Job B ($3.00), legacy job `43fcc471-...` ($2.25).
+
+### Negative cases tested
+
+| Scenario | Result |
+|----------|--------|
+| Tipping Job A again | `BAD_USER_INPUT` — "This job has already been tipped." |
+| OWNER attempts to tip (no `CustomerProfile` at all) | `FORBIDDEN` — "Only customers can leave tips." |
+| Tipping a `CANCELLED` job | `BAD_USER_INPUT` — "Only completed jobs can be tipped (current status: CANCELLED)." |
+| `amount: 1.999` (3 decimals) | `BAD_USER_INPUT` — "Tip must have at most 2 decimal places" |
+| `amount: -5` | `BAD_USER_INPUT` — "Tip must be greater than 0" |
+| `amount: 5000` (over the $1000 cap) | `BAD_USER_INPUT` — "Tip cannot exceed $1000" |
+
+### Concurrency test: two simultaneous tips on the same job
+
+Fired two `addTip` requests at the same untipped legacy job (`0cca260f-...`) at the same instant
+(backgrounded shell processes, no artificial delay). This specifically targets the claim in
+`addTip.ts` that the ledger has **no unique constraint** backing the duplicate-tip guard the way
+`EmployeeEarning`'s `(jobId, type)` constraint backs `JOB_PAY`/`TIP` earnings — so the in-transaction
+re-read of `tipAmount` is the *only* thing preventing a double-credit here.
+
+**Result:** one request succeeded (`tipAmount: 4`), the other cleanly failed with `BAD_USER_INPUT` —
+"This job has already been tipped." Confirmed exactly **one** `TIP` ledger entry exists for that job
+afterward (not zero, not two). The Serializable transaction plus the in-transaction re-check held up
+under real concurrency, not just in theory.
+
+---
+
+### 42.5 Earnings & Ledger Reads (with real data)
+
+Re-ran all five finance queries once meaningful data existed, to check the filters/pagination
+against real rows rather than just empty-array baselines.
+
+```json
+{"data":{"getUnpaidEarningsByMember":[{"unpaidTotal":49.75,"unpaidCount":6,"member":{"id":"cc28c51f-3c59-4c44-9cea-cf881b468533","role":"EMPLOYEE"}}]}}
+```
+`49.75` = `4 + 2.25 + 3 + 5.5` (four tips) `+ 17.5 + 17.5` (two JOB_PAYs) across 6 rows — matches.
+
+- `getBusinessEarnings(memberId: <employee>)` — returned the same 6 rows, none from any other member (there is only one sitter in this test business, so this doesn't prove cross-tenant isolation, just that the filter doesn't accidentally exclude everything).
+- `getBusinessEarnings(unpaidOnly: true)` — same 6 rows, all `isPaid: false`.
+- `getMyEarnings` as the employee — same 6 rows, self-service view matches the OWNER's cross-sitter view exactly.
+- `getBusinessEarnings(limit: 2)` — returned exactly 2, newest `createdAt` first.
+- `getBusinessLedger` (no args) — 6 entries, `seq` 1→6, running `balanceAfter` 25 → 50 → 55.5 → 58.5 → 60.75 → 64.75 (strictly increasing, matches the sum of all credits so far).
+- `getBusinessLedger(limit: 2)` then `getBusinessLedger(limit: 2, before: 5)` — page 1 returned `seq` 6,5; page 2 (cursor `before: 5`) returned `seq` 4,3 — no gap, no overlap. Confirms `seq` is a safe pagination cursor even though several entries share the same `createdAt` (this business had two separate completions land within the same second).
+
+---
+
+### 42.6 Payouts — `recordPayout`
+
+### Input
+
+```graphql
+mutation($input: RecordPayoutInput!) { recordPayout(input: $input) { id amount status method paidAt earnings { type amount } } }
+```
+
+**Variables:** `{ "input": { "businessId": "eeed145f-246b-4c14-8b1a-246850d1ea8a", "memberId": "cc28c51f-3c59-4c44-9cea-cf881b468533", "method": "Venmo", "note": "Weekly payout - test" } }`
+
+### Response
+
+```json
+{"data":{"recordPayout":{"id":"13827b93-e7f1-4cdd-96bb-ce0ab79998a6","amount":49.75,"status":"PAID","method":"Venmo","paidAt":"2026-07-19T23:17:12.634Z","earnings":[{"type":"TIP","amount":4},{"type":"TIP","amount":2.25},{"type":"TIP","amount":3},{"type":"TIP","amount":5.5},{"type":"JOB_PAY","amount":17.5},{"type":"JOB_PAY","amount":17.5}]}}}
+```
+
+`amount: 49.75` matches the `unpaidTotal` read in 42.5 exactly — confirming it really is summed from
+the claimed earnings and not a separately-entered figure. All 6 outstanding earnings were claimed in
+one call (no `throughDate` given, so "everything outstanding" is the correct scope).
+
+**After the payout:** `getBusinessFinancialSummary` → `currentBalance: 15, unpaidEarningsTotal: 0,
+availableBalance: 15` (was `currentBalance: 64.75` pre-payout — the $49.75 debit landed exactly).
+`getMyEarnings(unpaidOnly: true)` as the employee → `[]`. `getBusinessLedger` → new `seq: 7` `DEBIT`
+`PAYOUT` entry, `balanceAfter: 15`, linked `payout { status: "PAID" }`.
+
+### Key IDs
+Payout: `13827b93-e7f1-4cdd-96bb-ce0ab79998a6`, amount `$49.75`.
+
+### Negative cases tested
+
+| Scenario | Result |
+|----------|--------|
+| `recordPayout` as active MANAGER | `FORBIDDEN` — "Only the business owner can record payouts." |
+| `recordPayout` for a `memberId` belonging to no `BusinessMember` row in this business (used the Outsider's raw `User.id`, which isn't a `BusinessMember.id` at all) | `NOT_FOUND` — "Member not found in this business." |
+| `recordPayout` again immediately (nothing outstanding) | `BAD_USER_INPUT` — "This sitter has no outstanding earnings to pay out." |
+
+### `throughDate` cutoff
+
+Completed a third job (Job C, `f6c4074d-4266-4e03-a4e0-1c3952f6b0d1`) via `clockOut` after the payout
+above, producing one new outstanding `JOB_PAY` earning ($17.50). Called `recordPayout` with
+`throughDate: "2026-07-18T00:00:00.000Z"` (before that earning existed) → `BAD_USER_INPUT` — "This
+sitter has no outstanding earnings to pay out." (correctly excluded by the date bound). Then called
+`recordPayout` with no `throughDate` → succeeded, `amount: 17.5`, settling exactly Job C's earning
+and nothing else.
+
+### Concurrency test: two simultaneous payouts against one outstanding earning
+
+Tipped Job C ($6) to create exactly one fresh outstanding earning, then fired two `recordPayout`
+requests for the same member at the same instant. This targets the claim that the conditional
+`updateMany` (filtered on `payoutId: null`) is what actually prevents two payouts from both claiming
+the same earning, independent of Serializable isolation.
+
+**Result:** one request succeeded (`amount: 6`), the other failed with the same "no outstanding
+earnings" `BAD_USER_INPUT` — meaning the second request's own read (inside its own transaction) saw
+nothing left to claim. Only one `Payout` row was created for that $6; `getBusinessFinancialSummary`
+afterward showed `unpaidEarningsTotal: 0`, not a negative or double-deducted balance.
+
+### Notes
+- Final ledger after all of §42 (11 entries, `seq` 1→11): three `JOB_PAYMENT` credits ($25 each),
+  five `TIP` credits ($5.50, $3, $2.25, $4, $6), three `PAYOUT` debits ($49.75, $17.50, $6). Running
+  balance stayed internally consistent at every step (verified by re-deriving each `balanceAfter`
+  from the previous one plus/minus the new entry) and the final `currentBalance` from
+  `getBusinessFinancialSummary` ($22.50) matched the last ledger row's `balanceAfter` exactly.
+- **No mutation exists yet to create a `BONUS` or `ADJUSTMENT` earning directly** — both enum values
+  are schema-only for now, consistent with `AI_MANIFEST.md`. Not tested here because there's nothing
+  to call; if a manual-adjustment mutation is added later, this is the gap it fills.
+- Every one of the 8 new operations has now been exercised with a happy path, its documented negative
+  cases, and (for the two mutations where the codebase explicitly claims race-safety) a real
+  concurrent-request test — not just a single-threaded call.
 

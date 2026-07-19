@@ -65,6 +65,23 @@ enum LedgerReferenceType {
   ADJUSTMENT
 }
 
+// What a single EmployeeEarning row represents. JOB_PAY is the sitter's cut of a
+// completed job's price; TIP is a customer tip passed through to that sitter.
+enum EarningType {
+  JOB_PAY
+  TIP
+  BONUS
+  ADJUSTMENT
+}
+
+// Settlement state of a Payout. PENDING means the payout was recorded but the
+// money hasn't left yet; only PAID debits the business ledger.
+enum PayoutStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
 // How a user account authenticates (welcome/sign-in screen: Apple, Google, email)
 enum AuthProvider {
   EMAIL
@@ -154,6 +171,12 @@ model Business {
   // Flat per-booking fee surfaced at checkout ("flat $6 service fee")
   serviceFeeAmount Decimal?         @db.Decimal(10, 2)
 
+  // Fallback share of a job's price paid to the assigned sitter, as a percent
+  // (60.00 = 60%). Used only when that BusinessMember has no payRatePercent of
+  // their own. Null means there is no business-wide default and pay must be set
+  // per member — a job completed by a sitter with neither accrues no JOB_PAY.
+  defaultSitterPayPercent Decimal?  @db.Decimal(5, 2)
+
   // Denormalized review aggregates for fast list rendering ("★ 4.9 · 212 reviews")
   avgRating     Decimal?           @db.Decimal(3, 2)
   reviewCount   Int                @default(0)
@@ -169,6 +192,8 @@ model Business {
   bookings      Booking[]
   jobs          Job[]
   ledgerEntries LedgerEntry[]
+  earnings      EmployeeEarning[]
+  payouts       Payout[]
   reviews       Review[]
   invitations   Invitation[]
   conversations Conversation[]
@@ -187,6 +212,13 @@ model BusinessMember {
   isActive      Boolean                @default(true)
   backgroundCheckStatus BackgroundCheckStatus  @default(NOT_STARTED)
   onboardingCompletedAt DateTime?              // set when the invite → onboarding flow finishes
+
+  // This sitter's share of a job's price, as a percent (60.00 = 60%). Overrides
+  // Business.defaultSitterPayPercent. Read only at the moment an earning is
+  // written and snapshotted onto that row — editing it never restates pay the
+  // sitter has already accrued.
+  payRatePercent Decimal?              @db.Decimal(5, 2)
+
   joinedAt      DateTime               @default(now())
 
   user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -194,6 +226,8 @@ model BusinessMember {
   availability  EmployeeAvailability[]
   assignedJobs  Job[]                  @relation("JobAssignee")
   conversations Conversation[]
+  earnings      EmployeeEarning[]
+  payouts       Payout[]
 
   // Ensure a user has only one role per business
   @@unique([userId, businessId])
@@ -421,6 +455,7 @@ model Job {
   assignee            BusinessMember? @relation("JobAssignee", fields: [assigneeId], references: [id])
   pets                Pet[]           @relation("JobPets")
   ledgerEntries       LedgerEntry[]
+  earnings            EmployeeEarning[]
   review              Review?
   conversation        Conversation?
   updates             JobUpdate[]
@@ -492,8 +527,17 @@ model ReportCard {
 
 model LedgerEntry {
   id            String              @id @default(uuid())
+
+  // Monotonic ordering key. Do NOT order this table by createdAt to find the
+  // latest entry: Postgres CURRENT_TIMESTAMP is transaction-start time, so two
+  // entries appended in one transaction share an identical createdAt and the
+  // "read the latest balanceAfter" rule would pick between them arbitrarily.
+  // Always order by seq. createdAt is for display and date-range filtering only.
+  seq           Int                 @unique @default(autoincrement())
+
   businessId    String
   jobId         String?
+  payoutId      String?             @unique  // set on the PAYOUT debit; one entry per payout
   entryType     EntryType
   amount        Decimal             @db.Decimal(10, 2)
   balanceAfter  Decimal             @db.Decimal(10, 2)
@@ -504,8 +548,79 @@ model LedgerEntry {
 
   business      Business            @relation(fields: [businessId], references: [id])
   job           Job?                @relation(fields: [jobId], references: [id])
+  payout        Payout?             @relation(fields: [payoutId], references: [id])
+
+  @@index([businessId, seq(sort: Desc)])       // latest-balance read
+  @@index([businessId, createdAt(sort: Desc)]) // statement / date-range read
+}
+
+// ----------------------------------------------------------------------
+// EMPLOYEE PAY
+// ----------------------------------------------------------------------
+// EmployeeEarning is the accounts-payable subledger: what the business owes an
+// individual sitter. It is deliberately NOT part of LedgerEntry — that table
+// carries a running balanceAfter, and a running balance is only meaningful for
+// one account. Mixing per-sitter rows into it would make that column ambiguous.
+//
+// Unlike LedgerEntry there is no balanceAfter here. A sitter's outstanding
+// balance is derived: sum(amount) where payoutId is null. That keeps the accrual
+// path free of any read-modify-write on a running total, so only the business
+// ledger needs Serializable isolation.
+
+model EmployeeEarning {
+  id          String         @id @default(uuid())
+  businessId  String
+  memberId    String         // BusinessMember, not User — pay is scoped per business
+  jobId       String?
+  type        EarningType
+  amount      Decimal        @db.Decimal(10, 2)
+
+  // Snapshot of the rule that produced `amount`, in the same spirit as
+  // BookingAddOn.priceAtBooking: changing a sitter's rate must never restate
+  // what they already earned. basisAmount is the figure ratePercent applied to
+  // (Job.price for JOB_PAY, Job.tipAmount for TIP). Both null for BONUS and
+  // ADJUSTMENT, which are entered as a flat amount.
+  ratePercent Decimal?       @db.Decimal(5, 2)
+  basisAmount Decimal?       @db.Decimal(10, 2)
+
+  payoutId    String?        // null = accrued but not yet paid out
+  description String?
+  createdAt   DateTime       @default(now())
+
+  business    Business       @relation(fields: [businessId], references: [id])
+  member      BusinessMember @relation(fields: [memberId], references: [id])
+  job         Job?           @relation(fields: [jobId], references: [id])
+  payout      Payout?        @relation(fields: [payoutId], references: [id])
+
+  // One JOB_PAY and one TIP per job, enforced at the DB level. Job completion is
+  // reachable from both clockOut and completeJob, so this is the backstop that
+  // makes a double-credit impossible rather than merely unlikely.
+  @@unique([jobId, type])
+  @@index([memberId, payoutId])  // "what is still owed to this sitter"
+  @@index([businessId, createdAt(sort: Desc)])
+}
+
+// A single settlement to one sitter, covering the EmployeeEarning rows that
+// point at it. Only the transition to PAID appends the PAYOUT debit to
+// LedgerEntry — a PENDING payout has not moved any cash yet.
+model Payout {
+  id            String            @id @default(uuid())
+  businessId    String
+  memberId      String
+  amount        Decimal           @db.Decimal(10, 2)
+  status        PayoutStatus      @default(PENDING)
+  method        String?           // free text for now, e.g. "Venmo", "Direct deposit"
+  note          String?
+  paidAt        DateTime?
+  createdAt     DateTime          @default(now())
+
+  business      Business          @relation(fields: [businessId], references: [id])
+  member        BusinessMember    @relation(fields: [memberId], references: [id])
+  earnings      EmployeeEarning[]
+  ledgerEntry   LedgerEntry?
 
   @@index([businessId, createdAt(sort: Desc)])
+  @@index([memberId, status])
 }
 
 // ----------------------------------------------------------------------
