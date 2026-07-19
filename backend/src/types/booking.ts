@@ -87,3 +87,13 @@ export interface GetJobUpdatesInput {
     limit?: number;
     before?: string;
 }
+
+/**
+ * Input for cancelling a job. The reason is optional and stored on the job
+ * for display; who may cancel, and from which statuses, is enforced in the
+ * resolver — see cancelJob.
+ */
+export interface CancelJobInput {
+    jobId: string;
+    reason?: string;
+}

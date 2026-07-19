@@ -18,6 +18,8 @@ const startApolloServer = async () => {
     const server = new ApolloServer({
         typeDefs,
         resolvers,
+        // Never leak server file paths/stack traces to clients, in any environment.
+        includeStacktraceInErrorResponses: false,
     });
 
     await server.start();

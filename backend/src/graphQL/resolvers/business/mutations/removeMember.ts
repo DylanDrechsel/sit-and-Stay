@@ -65,13 +65,15 @@ export const removeMember = async (
         include: { user: true },
     });
 
-    if (
-        targetMembership == null ||
-        !targetMembership.isActive ||
-        targetMembership.businessId !== businessId
-    ) {
+    if (targetMembership == null || targetMembership.businessId !== businessId) {
         throw new GraphQLError('Member not found in this business.', {
             extensions: { code: 'NOT_FOUND' },
+        });
+    }
+
+    if (!targetMembership.isActive) {
+        throw new GraphQLError('This member has already been removed.', {
+            extensions: { code: 'BAD_USER_INPUT' },
         });
     }
 
