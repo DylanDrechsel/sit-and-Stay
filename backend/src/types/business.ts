@@ -57,3 +57,11 @@ export interface BusinessParent {
     avgRating: unknown;
     serviceFeeAmount: unknown;
 }
+
+/**
+ * Minimal parent shape for the BusinessMember type-level field resolvers —
+ * just the membership id the lazily-fetched `availability` relation is keyed on.
+ */
+export interface BusinessMemberParent {
+    id: string;
+}

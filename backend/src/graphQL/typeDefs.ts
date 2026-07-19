@@ -66,6 +66,23 @@ const typeDefs = `#graphql
     isActive: Boolean!
     joinedAt: String!
     user: User!          # Full profile of the member
+    # Recurring weekly schedule, Monday→Sunday. Lazily resolved, so it costs
+    # nothing on queries that don't ask for it. Days never configured are simply
+    # absent from the list — see setAvailability.
+    availability: [EmployeeAvailability!]!
+  }
+
+  # One day of a member's recurring weekly schedule. This is the data
+  # getAvailableEmployees reads when working out who can take a job.
+  # A day with no row at all means "never configured", which is treated as
+  # unavailable — distinct from a row with isAvailable: false, meaning "day off".
+  type EmployeeAvailability {
+    id: ID!
+    employeeId: ID!      # BusinessMember.id, not User.id
+    dayOfWeek: String!   # MONDAY | TUESDAY | ... | SUNDAY
+    startTime: String!   # "HH:MM", 24-hour
+    endTime: String!     # "HH:MM", 24-hour
+    isAvailable: Boolean!
   }
 
   # A service a business advertises (e.g., Dog Walking — 30 min)
@@ -314,6 +331,27 @@ const typeDefs = `#graphql
     businessId: ID!
     latitude: Float!
     longitude: Float!
+  }
+
+  # One day of a member's weekly schedule.
+  # startTime/endTime are "HH:MM" 24-hour and required UNLESS isAvailable is
+  # false — a day off has no meaningful window. isAvailable defaults to true.
+  # Omitting the times while toggling a day off preserves whatever hours are
+  # already stored, so switching it back on restores them.
+  input AvailabilitySlotInput {
+    dayOfWeek: String!   # MONDAY | TUESDAY | ... | SUNDAY
+    startTime: String
+    endTime: String
+    isAvailable: Boolean
+  }
+
+  # memberId is the BusinessMember.id, not the User.id — availability is
+  # per-membership, so a sitter working for two businesses keeps a separate
+  # schedule for each. Days omitted from slots are left untouched: this is a
+  # partial update, not a full-week replace. Each day may appear at most once.
+  input SetAvailabilityInput {
+    memberId: ID!
+    slots: [AvailabilitySlotInput!]!
   }
 
   # ── Service inputs ————————————————————————————————
@@ -608,6 +646,12 @@ const typeDefs = `#graphql
     # Soft-removes a member from a business by setting BusinessMember.isActive to false
     # OWNER can remove MANAGER or EMPLOYEE; MANAGER can only remove EMPLOYEE
     removeMember(input: RemoveMemberInput!): BusinessMember!
+
+    # Writes one or more days of a member's recurring weekly schedule — the data
+    # getAvailableEmployees reads when deciding who can be assigned to a job.
+    # Callable by the member themselves, or by an active OWNER/MANAGER of their
+    # business. Returns the member's full week, not just the days that changed.
+    setAvailability(input: SetAvailabilityInput!): [EmployeeAvailability!]!
 
     # ── Service mutations ————————————————————————
 
