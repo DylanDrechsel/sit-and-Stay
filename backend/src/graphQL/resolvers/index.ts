@@ -34,6 +34,7 @@ export default {
     Booking: jobResolvers.Booking,
     BookingAddOn: jobResolvers.BookingAddOn,
     Business: businessResolvers.Business,
+    BusinessMember: businessResolvers.BusinessMember,
     CustomerProfile: customerResolvers.CustomerProfile,
     ServiceOffering: serviceResolvers.ServiceOffering,
     ServiceOfferingAddOn: serviceResolvers.ServiceOfferingAddOn,

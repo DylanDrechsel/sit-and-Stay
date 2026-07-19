@@ -53,8 +53,9 @@ pet_sitter_pro/
     │   ├── server.ts              # Entry point — Express + Apollo setup
     │   ├── types/                 # Shared TypeScript interfaces
     │   │   ├── auth.ts            # LoginInput
+    │   │   ├── availability.ts    # AvailabilitySlotInput, SetAvailabilityInput
     │   │   ├── booking.ts         # Booking/Job lifecycle inputs, job listing query inputs, Job/Booking parent shapes
-    │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput, GetNearbyBusinessesInput, SetBusinessLocationInput, BusinessParent
+    │   │   ├── business.ts        # UpdateBusinessInput, RemoveMemberInput, GetNearbyBusinessesInput, SetBusinessLocationInput, BusinessParent, BusinessMemberParent
     │   │   ├── context.ts         # GraphQLContext interface
     │   │   ├── customer.ts        # CustomerProfileParent
     │   │   ├── invitation.ts      # InviteInput, AcceptInvitationInput, InvitationEmailPayload
@@ -132,6 +133,7 @@ pet_sitter_pro/
     │           │   └── mutations/
     │           │       ├── deactivateBusiness.ts
     │           │       ├── removeMember.ts
+    │           │       ├── setAvailability.ts       # write side for getAvailableEmployees
     │           │       ├── setBusinessLocation.ts   # $executeRaw — Prisma can't write Unsupported columns
     │           │       └── updateBusiness.ts
     │           ├── review/
@@ -653,15 +655,37 @@ Recurring weekly schedule for an employee. One record per day per employee (`@@u
 | `endTime`    | String        | format `HH:MM`                          |
 | `isAvailable`| Boolean       | default `true`                          |
 
-> **GraphQL/resolver status:** not exposed as its own type or CRUD surface — there is no
-> `createAvailability`/`setAvailability` mutation yet, so rows must currently be created directly
-> (e.g. via Prisma Studio) for `getAvailableEmployees` (§10, `resolvers/job/queries/`) to have
-> anything to read. That query consumes this model read-only: for a given job, it checks each
-> business member's row for the job's day of week (no row = not available) against the job's
-> scheduled time-of-day window, then separately checks for overlapping `ASSIGNED`/`IN_PROGRESS`
-> jobs already on that member. See `Job Resolver Behavior` in §10 for the full algorithm and its
-> known limitation (multi-day jobs like boarding are only checked against `scheduledStartTime`'s
-> single day).
+**Three distinct states per day**, which `getAvailableEmployees` reports differently:
+
+| State | Meaning | Reported as |
+|-------|---------|-------------|
+| No row | never configured | `"No availability set for this day"` |
+| Row, `isAvailable: false` | explicit day off | `"Off this day"` |
+| Row, `isAvailable: true` | working `startTime`–`endTime` | available if the job fits the window |
+
+Absence is deliberately **not** treated as "available all day" — availability must be configured, not
+assumed, so a new hire is never auto-assigned to work nobody scheduled them for.
+
+`startTime`/`endTime` are compared with plain **string comparison**, which is only correct because
+every value is zero-padded fixed-width `HH:MM` (enforced by `timeOfDayField` in `utils/validate.ts`).
+A value like `"9:00"` would sort before `"17:00"` and silently break the window check.
+
+> **GraphQL/resolver status:** written via `setAvailability`
+> (`resolvers/business/mutations/setAvailability.ts`), read via the lazily-resolved
+> `BusinessMember.availability` field (`resolvers/business/businessResolvers.ts`) — there's no
+> dedicated root query, since availability is always reached through a member. `setAvailability` is
+> **partial by day**: days omitted from `slots` are untouched, and each day is upserted against the
+> `(employeeId, dayOfWeek)` unique key inside one `$transaction` so a partial week can't land.
+> Callable by the member themselves **or** an active OWNER/MANAGER of their business (staff
+> schedules are often filled in by whoever runs the business). Toggling a day off without sending
+> times preserves the hours already stored, so switching it back on restores them; a brand-new
+> day-off row stores `00:00`–`00:00`, which is never read while `isAvailable` is false.
+>
+> `getAvailableEmployees` (§10, `resolvers/job/queries/`) consumes this model read-only: for a given
+> job it checks each business member's row for the job's day of week against the job's scheduled
+> time-of-day window, then separately checks for overlapping `ASSIGNED`/`IN_PROGRESS` jobs already on
+> that member. See `Job Resolver Behavior` in §10 for the full algorithm and its known limitation
+> (multi-day jobs like boarding are only checked against `scheduledStartTime`'s single day).
 
 ---
 
@@ -963,6 +987,7 @@ behavior sections below), not root operations.
 | `setBusinessLocation` | `SetBusinessLocationInput` | `Business!`   | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/setBusinessLocation.ts` — the only mutation that writes `Business.location`; uses `$executeRaw` since Prisma can't write `Unsupported` columns via `update()` |
 | `deactivateBusiness`| `businessId: ID!`        | `Business!`        | Yes (active OWNER)   | `resolvers/business/mutations/deactivateBusiness.ts` |
 | `removeMember`      | `RemoveMemberInput`      | `BusinessMember!`  | Yes (active OWNER/MANAGER) | `resolvers/business/mutations/removeMember.ts` — sets `isActive` to `false`; does not delete the row |
+| `setAvailability`   | `SetAvailabilityInput`   | `[EmployeeAvailability!]!` | Yes (the member themselves, **or** an active OWNER/MANAGER of their business) | `resolvers/business/mutations/setAvailability.ts` — the write side for `getAvailableEmployees`. Partial by day; upserts each day against `(employeeId, dayOfWeek)` in one `$transaction`. Returns the member's full week (Monday→Sunday), not just the days that changed |
 | `addPet`            | `AddPetInput`            | `Pet!`             | Yes (JWT + CustomerProfile) | `resolvers/customer/mutations/addPet.ts` — resolves the caller's `CustomerProfile` from the JWT, then creates the pet scoped to that `customerId` |
 | `updatePet`         | `UpdatePetInput`         | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/updatePet.ts` — returns 404 (NOT_FOUND) rather than FORBIDDEN if the `petId` belongs to another customer, to avoid confirming a pet ID exists cross-account |
 | `deletePet`         | `petId: ID!`             | `Pet!`             | Yes (JWT + pet ownership)  | `resolvers/customer/mutations/deletePet.ts` — same 404-on-mismatch pattern as `updatePet`; sets `isActive` to `false` (soft delete), does not destroy the row |
@@ -1001,6 +1026,8 @@ behavior sections below), not root operations.
 | `UpdateBusinessInput` | `businessId`, `name?`, `description?` | Requires a UUID business ID and at least one update field. Empty `description` clears the stored value. |
 | `SetBusinessLocationInput` | `businessId`, `latitude`, `longitude` | Zod schema (`setBusinessLocationSchema`) reuses the same lat/lng bounds as `getNearbyBusinessesSchema`. |
 | `RemoveMemberInput` | `businessId`, `memberId` | Both IDs must be UUIDs; `memberId` identifies a `BusinessMember`, not a `User`. |
+| `AvailabilitySlotInput` | `dayOfWeek`, `startTime?`, `endTime?`, `isAvailable?` | `dayOfWeek` is `MONDAY`…`SUNDAY`. Times are zero-padded 24-hour `HH:MM` and **required unless `isAvailable` is false**; `endTime` must be after `startTime` (object-level `.refine()`). `isAvailable` defaults to `true`. |
+| `SetAvailabilityInput` | `memberId`, `slots` | `memberId` is a `BusinessMember.id`, not a `User.id` — availability is per-membership, so a sitter working for two businesses keeps a separate schedule for each. 1–7 slots, and **each day may appear at most once**: two entries for the same day would upsert over each other and silently discard one. |
 | `AddPetInput` | `name`, `type`, all other `Pet` fields optional | Zod schema (`addPetSchema`) in `validate.ts`. `name` and `type` (must be a valid `PetType` enum value) are required. All other fields are optional. |
 | `UpdatePetInput` | `petId`, all other fields optional | Zod schema (`updatePetSchema`) in `validate.ts`. Partial update — only provided fields are written. An empty string on a clearable text field (`breed`, `medicalNotes`, etc.) clears it to `null`. `age`, `sex`, and `weightLb` accept explicit `null` to clear the value. |
 | `BookingSessionInput` | `scheduledStartTime`, `scheduledEndTime` | Both required datetime strings; `scheduledEndTime` must be after `scheduledStartTime` (Zod `.refine()`). One `Job` is created per entry in `CreateBookingInput.sessions`. |
@@ -1035,7 +1062,8 @@ behavior sections below), not root operations.
 | `AuthPayload`      | `token: String!, user: User!`               | Returned by `registerCustomer`, `login`, `acceptInvitation` |
 | `OwnerAuthPayload` | `token: String!, user: User!, business: Business!` | Returned by `registerOwner`       |
 | `Invitation`       | `id, email, role, expiresAt, isAccepted`    | Returned by `inviteEmployee`, `resendInvitation` |
-| `BusinessMember`   | `id, role, isActive, joinedAt, user: User!` | Returned by `getBusinessMembers`, `removeMember` |
+| `BusinessMember`   | `id, role, isActive, joinedAt, user: User!, availability: [EmployeeAvailability!]!` | Returned by `getBusinessMembers`, `removeMember`. `availability` is a lazily-resolved type-level field (`resolvers/business/businessResolvers.ts`), so it costs nothing on queries that don't request it and works anywhere a `BusinessMember` appears — including nested under `EmployeeAvailabilityStatus.member` on the assign-sitter screen |
+| `EmployeeAvailability` | All `EmployeeAvailability` model fields | Returned by `setAvailability` and `BusinessMember.availability`, ordered Monday→Sunday (Postgres sorts enum columns by declaration order, and `DayOfWeek` is declared MONDAY-first). No field resolvers needed |
 | `Pet`              | All `Pet` model fields including `isActive` | Returned by `getMyPets`, `addPet`, `updatePet`, `deletePet`. `weightLb` is `Float?`; the underlying Prisma `Decimal` must be converted with `Number()` in resolvers before returning. |
 | `Job`              | Nearly all `Job` model fields, plus lazy `pets`, `customer: CustomerProfile!`, `service: ServiceOffering!`, `assignee: BusinessMember` | `price` and `tipAmount` are `Float`/`Float?` resolved via type-level field resolvers (`Number()` conversion from Prisma `Decimal`). `pets`/`customer`/`service`/`assignee` are resolved lazily (own queries keyed off the parent, not `include`s) — the display relations list screens need ("Alex R. · Biscuit · Walk"). `accessCode` is resolved via a gated field resolver — see `Job Resolver Behavior` below; it is **not** a plain passthrough field. `status` is a raw `String!` (not a GraphQL enum) covering all seven `JobStatus` values including `DECLINED`. |
 | `Booking`          | All `Booking` model fields, plus `jobs: [Job!]!` and `addOns: [BookingAddOn!]!` | `totalPrice` is `Float!` via a type-level resolver. `jobs` and `addOns` are both resolved lazily (separate queries keyed by `bookingId`), not via Prisma `include` — see `Job Resolver Behavior` below. Returned by `createBooking` and listed via `getMyBookings`. |

@@ -99,7 +99,8 @@ export const acceptInvitationSchema = z.object({
  * Rules:
  * - All fields are optional — only provided fields are validated and written to the database.
  * - At least one field must be present in the request (enforced by object-level .refine()).
- * - 'avatarUrl' accepts full absolute URLs (e.g., https://...) OR local relative paths (e.g., /uploads/...).
+ * - 'avatarUrl' accepts a full absolute URL (e.g., https://...) OR any root-relative path (starting
+ *   with /). The app has no upload mechanism, so the caller supplies an already-hosted URL.
  */
 export const updateUserSchema = z.object({
     firstName: firstNameField.optional(),
@@ -173,6 +174,57 @@ export const removeMemberSchema = z.object({
     businessId: businessIdField,
     memberId: memberIdField,
 });
+
+// ── Employee availability schemas ──────────────────────────────────────────
+
+const dayOfWeekField = z.enum(
+    ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
+    { message: 'Day must be MONDAY through SUNDAY' },
+);
+
+// "HH:MM", 24-hour, zero-padded. The zero-padding is not just formatting:
+// getAvailableEmployees compares these windows with plain string comparison
+// (`jobStart < availability.startTime`), which is only correct while every
+// stored value is the same fixed width. "9:00" would silently sort wrong.
+const timeOfDayField = z.string().regex(
+    /^([01]\d|2[0-3]):[0-5]\d$/,
+    'Time must be in 24-hour HH:MM format (e.g. 09:00, 17:30)',
+);
+
+/**
+ * One day of a member's weekly schedule. Times are required unless the day is
+ * explicitly marked unavailable, since a day off has no meaningful window.
+ */
+const availabilitySlotSchema = z.object({
+    dayOfWeek: dayOfWeekField,
+    startTime: timeOfDayField.optional(),
+    endTime: timeOfDayField.optional(),
+    isAvailable: z.boolean().optional(),
+}).refine(
+    (slot) => slot.isAvailable === false || (slot.startTime !== undefined && slot.endTime !== undefined),
+    { message: 'startTime and endTime are required unless the day is marked unavailable' },
+).refine(
+    (slot) => slot.startTime === undefined || slot.endTime === undefined || slot.startTime < slot.endTime,
+    { message: 'endTime must be after startTime' },
+);
+
+/**
+ * Validates input for writing a member's weekly availability. Days omitted
+ * from `slots` are left untouched.
+ *
+ * The duplicate-day check matters: `EmployeeAvailability` is uniquely keyed on
+ * (employeeId, dayOfWeek), so two entries for the same day in one payload
+ * would upsert over each other and silently discard one of them.
+ */
+export const setAvailabilitySchema = z.object({
+    memberId: memberIdField,
+    slots: z.array(availabilitySlotSchema)
+        .min(1, 'At least one day is required')
+        .max(7, 'A week has only seven days'),
+}).refine(
+    (data) => new Set(data.slots.map((slot) => slot.dayOfWeek)).size === data.slots.length,
+    { message: 'Each day can appear at most once' },
+);
 
 const serviceCategoryField = z.enum(
     ['WALKING', 'BOARDING', 'DROP_IN', 'DAY_CARE', 'TRAINING', 'GROOMING', 'HOUSE_SITTING'],
@@ -336,7 +388,8 @@ const petTypeField = z.enum(['DOG', 'CAT', 'BIRD', 'RABBIT', 'REPTILE', 'OTHER']
 const petSexField = z.enum(['MALE', 'FEMALE'], {
     message: 'Sex must be MALE or FEMALE',
 });
-// Accepts a full absolute URL (e.g., https://...) or a local relative path (e.g., /uploads/...)
+// Accepts a full absolute URL (e.g., https://...) or any root-relative path (starting with /).
+// The app has no upload mechanism — the caller supplies an already-hosted URL.
 const photoUrlField = z.string().trim().refine(
     (val) => val.startsWith('/') || z.string().url().safeParse(val).success,
     { message: 'Invalid photo URL or path' },
