@@ -10,6 +10,20 @@ export interface UpdateBusinessInput {
     businessId: string;
     name?: string;
     description?: string;
+    // Fallback share of a job's price paid to the assigned sitter, as a percent.
+    // null clears it; undefined leaves it untouched.
+    defaultSitterPayPercent?: number | null;
+}
+
+/**
+ * Input for setting one member's own pay rate, overriding the business default.
+ * memberId is the BusinessMember.id, not the User.id. A null payRatePercent
+ * clears the override so the business default applies again.
+ */
+export interface SetMemberPayRateInput {
+    businessId: string;
+    memberId: string;
+    payRatePercent: number | null;
 }
 
 /**
@@ -54,14 +68,20 @@ export interface SetBusinessLocationInput {
  * (businessResolvers.ts) that convert Decimal-backed fields to Number.
  */
 export interface BusinessParent {
+    id: string;
     avgRating: unknown;
     serviceFeeAmount: unknown;
+    defaultSitterPayPercent: unknown;
 }
 
 /**
- * Minimal parent shape for the BusinessMember type-level field resolvers —
- * just the membership id the lazily-fetched `availability` relation is keyed on.
+ * Minimal parent shape for the BusinessMember type-level field resolvers: the
+ * membership id the lazily-fetched `availability` relation is keyed on, plus
+ * the fields `payRatePercent` needs to decide whether the caller may see it.
  */
 export interface BusinessMemberParent {
     id: string;
+    userId: string;
+    businessId: string;
+    payRatePercent: unknown;
 }

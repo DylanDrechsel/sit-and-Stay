@@ -1,4 +1,5 @@
 import { GraphQLError } from 'graphql';
+import { runSerializable, recordJobCompletionFinancials } from '../../../../utils/ledger.js';
 import type { GraphQLContext } from '../../../../types/context.js';
 
 /**
@@ -9,6 +10,11 @@ import type { GraphQLContext } from '../../../../types/context.js';
  * needs correcting), not as the sitter's normal completion path (clockOut).
  * Valid transitions: ASSIGNED -> COMPLETED, IN_PROGRESS -> COMPLETED.
  * Backfills actualStartTime if the sitter never clocked in.
+ *
+ * Books the same financials as clockOut, in the same transaction as the status
+ * change. These two mutations are the only routes to COMPLETED and both must
+ * write pay — a job completed through this override still earned the sitter
+ * their cut. Keep them in step.
  */
 export const completeJob = async (
     _: unknown,
@@ -47,12 +53,32 @@ export const completeJob = async (
         });
     }
 
-    return context.prisma.job.update({
-        where: { id: jobId },
-        data: {
-            status: 'COMPLETED',
-            actualStartTime: job.actualStartTime ?? new Date(),
-            actualEndTime: new Date(),
-        },
+    return runSerializable(context.prisma, async (tx) => {
+        // Re-read inside the transaction — see the same note in clockOut. This
+        // also closes the clockOut/completeJob race, where a sitter clocking out
+        // and a manager overriding at the same moment could otherwise both pass
+        // their status check and double-book the job's financials.
+        const fresh = await tx.job.findUnique({
+            where: { id: jobId },
+            select: { status: true, actualStartTime: true },
+        });
+        if (fresh == null || (fresh.status !== 'ASSIGNED' && fresh.status !== 'IN_PROGRESS')) {
+            throw new GraphQLError('This job can no longer be completed.', {
+                extensions: { code: 'BAD_USER_INPUT' },
+            });
+        }
+
+        const updated = await tx.job.update({
+            where: { id: jobId },
+            data: {
+                status: 'COMPLETED',
+                actualStartTime: fresh.actualStartTime ?? new Date(),
+                actualEndTime: new Date(),
+            },
+        });
+
+        await recordJobCompletionFinancials(tx, updated);
+
+        return updated;
     });
 };

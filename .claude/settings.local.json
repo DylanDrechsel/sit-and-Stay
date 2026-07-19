@@ -7,7 +7,11 @@
       "Bash(git -C \"C:/Users/Drech/Documents/computer_science/projects/pet_sitter\" diff backend/prisma/schema.prisma)",
       "Bash(npx prisma *)",
       "Bash(npm --version)",
-      "Bash(ls -t \"/mnt/c/Users/Drech/Documents/computer_science/projects/pet_sitter/backend/prisma/migrations/\" | head -5)"
+      "Bash(ls -t \"/mnt/c/Users/Drech/Documents/computer_science/projects/pet_sitter/backend/prisma/migrations/\" | head -5)",
+      "Bash(curl -sv -m 8 http://localhost:4000/health)",
+      "Bash(curl -s -X POST http://localhost:4000/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"query\":\"query\\($businessId: ID!\\) { getServiceOfferings\\(businessId: $businessId\\) { id name category basePrice isActive } }\",\"variables\":{\"businessId\":\"__TRACKED_VAR__\"}}')",
+      "Bash(curl -s -X POST http://localhost:4000/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"query\":\"query { getMyPets { id name isActive } }\"}')",
+      "Bash(curl -s -X POST http://localhost:4000/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"query\":\"query\\($businessId: ID!\\) { getServiceOfferings\\(businessId: $businessId\\) { id title basePrice isActive } }\",\"variables\":{\"businessId\":\"__TRACKED_VAR__\"}}')"
     ]
   }
 }

@@ -89,6 +89,15 @@ export interface GetJobUpdatesInput {
 }
 
 /**
+ * Input for tipping a completed job. amount is the tip in dollars, positive and
+ * at most 2 decimal places. One tip per job — the resolver rejects a second.
+ */
+export interface AddTipInput {
+    jobId: string;
+    amount: number;
+}
+
+/**
  * Input for cancelling a job. The reason is optional and stored on the job
  * for display; who may cancel, and from which statuses, is enforced in the
  * resolver — see cancelJob.

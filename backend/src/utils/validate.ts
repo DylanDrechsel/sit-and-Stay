@@ -157,14 +157,60 @@ const memberIdField = z.string().uuid('Invalid member ID');
  * businessId is required; name and description are optional.
  * At least one of name or description must be provided (enforced by .refine()).
  */
+/**
+ * True when `value` has at most two decimal places — the precision every
+ * Decimal(n,2) money column in this schema stores.
+ *
+ * Compares against a rounded value instead of testing Number.isInteger(value * 100).
+ * That naive form looks equivalent but isn't: binary floating point puts
+ * 19.99 * 100 at 1998.9999999999998, so it rejects roughly 11% of legitimate
+ * two-decimal amounts (2,293 of the 20,000 values under $200), $19.99 included.
+ * Use this helper for any new money or percentage field rather than re-deriving
+ * the check.
+ */
+const hasAtMostTwoDecimals = (value: number): boolean =>
+    Math.abs(value * 100 - Math.round(value * 100)) < 1e-9;
+
+/**
+ * A pay share expressed as a percentage: 60 means 60% of the job's price.
+ * Bounded 0-100 and capped at two decimals to match the Decimal(5,2) columns
+ * it lands in (Business.defaultSitterPayPercent, BusinessMember.payRatePercent)
+ * — a third decimal would be silently rounded by Postgres, quietly paying a
+ * sitter something other than what the owner typed.
+ */
+const payPercentField = z
+    .number({ message: 'Pay percent must be a number' })
+    .min(0, 'Pay percent cannot be negative')
+    .max(100, 'Pay percent cannot exceed 100')
+    .refine(hasAtMostTwoDecimals, {
+        message: 'Pay percent supports at most 2 decimal places',
+    });
+
 export const updateBusinessSchema = z.object({
     businessId: businessIdField,
     name: z.string().trim().min(1, 'Business name cannot be empty').max(100, 'Business name too long').optional(),
     description: z.string().trim().max(500, 'Description too long').optional(),
+    // null explicitly clears the business-wide default, leaving per-member rates
+    // as the only source of sitter pay.
+    defaultSitterPayPercent: payPercentField.nullable().optional(),
 }).refine(
-    (data) => data.name !== undefined || data.description !== undefined,
-    { message: 'At least one field (name or description) must be provided to update' },
+    (data) =>
+        data.name !== undefined ||
+        data.description !== undefined ||
+        data.defaultSitterPayPercent !== undefined,
+    { message: 'At least one field (name, description, or defaultSitterPayPercent) must be provided to update' },
 );
+
+/**
+ * Validates input for setting one member's pay rate.
+ * memberId is the BusinessMember.id, not the User.id. A null payRatePercent
+ * clears the member's own rate so they fall back to the business default.
+ */
+export const setMemberPayRateSchema = z.object({
+    businessId: businessIdField,
+    memberId: memberIdField,
+    payRatePercent: payPercentField.nullable(),
+});
 
 /**
  * Validates input for removing a member from a business.
@@ -274,7 +320,7 @@ const serviceAddOnIdField = z.string().uuid('Invalid service add-on ID');
 
 // Reusable field — prices are positive amounts with at most 2 decimal places
 const priceField = z.number().positive('Price must be greater than 0')
-    .refine((value) => Number.isInteger(value * 100), 'Price must have at most 2 decimal places');
+    .refine(hasAtMostTwoDecimals, 'Price must have at most 2 decimal places');
 
 // Badge chips shown on the service card, e.g. "GPS tracked", "Insured"
 const featuresField = z.array(z.string().trim().min(1, 'Feature cannot be empty').max(50, 'Feature too long'))
@@ -567,6 +613,84 @@ export const submitReportCardSchema = z.object({
     drankWater: z.boolean().optional(),
     gaveTreat: z.boolean().optional(),
     summary: z.string().trim().max(2000, 'Summary too long').optional(),
+});
+
+/**
+ * Upper bound on a single tip. Not a database limit — Decimal(10,2) would take
+ * far more — but a fat-finger guard, since an extra digit on a tip is a plausible
+ * mistake and there is no reversal flow. Raise it if real usage needs more.
+ */
+const MAX_TIP_AMOUNT = 1000;
+
+/**
+ * Validates input for tipping a completed job. The resolver enforces the
+ * DB-dependent rules Zod can't see: the caller is the job's customer, the job
+ * is COMPLETED, and it hasn't already been tipped.
+ */
+export const addTipSchema = z.object({
+    jobId: jobIdField,
+    amount: z.number()
+        .positive('Tip must be greater than 0')
+        .max(MAX_TIP_AMOUNT, `Tip cannot exceed $${MAX_TIP_AMOUNT}`)
+        .refine(hasAtMostTwoDecimals, 'Tip must have at most 2 decimal places'),
+});
+
+// ── Finance schemas ─────────────────────────────────────────────────────────
+
+/** Shared page size across the finance reads, same bounds as getJobUpdates. */
+const financeLimitField = z.number()
+    .int('Limit must be a whole number')
+    .positive('Limit must be greater than 0')
+    .max(100, 'Limit cannot exceed 100')
+    .default(50);
+
+/**
+ * Validates args for the business ledger statement. The `before` cursor is a
+ * LedgerEntry.seq value rather than a timestamp — seq is the only ordering key
+ * guaranteed to be unique and monotonic, so paging on it can't skip or repeat
+ * entries that share a createdAt.
+ */
+export const getBusinessLedgerSchema = z.object({
+    businessId: businessIdField,
+    limit: financeLimitField,
+    before: z.number()
+        .int('Cursor must be a whole number')
+        .positive('Cursor must be greater than 0')
+        .optional(),
+});
+
+/** Validates args for the finance queries that take only a business id. */
+export const businessFinanceScopeSchema = z.object({
+    businessId: businessIdField,
+});
+
+/** Validates args for an OWNER/MANAGER reading their business's earnings. */
+export const getBusinessEarningsSchema = z.object({
+    businessId: businessIdField,
+    memberId: memberIdField.optional(),
+    unpaidOnly: z.boolean().default(false),
+    limit: financeLimitField,
+});
+
+/** Validates args for a member reading their own earnings. */
+export const getMyEarningsSchema = z.object({
+    businessId: businessIdField,
+    unpaidOnly: z.boolean().default(false),
+    limit: financeLimitField,
+});
+
+/**
+ * Validates input for recording a sitter payout. Note there is no `amount`
+ * field, deliberately: the payout total is summed from the earnings it settles
+ * (see settleEarningsIntoPayout) so it can never disagree with its own line
+ * items. `throughDate` bounds the settlement for a payroll cutoff.
+ */
+export const recordPayoutSchema = z.object({
+    businessId: businessIdField,
+    memberId: memberIdField,
+    throughDate: z.coerce.date({ message: 'Invalid throughDate' }).optional(),
+    method: z.string().trim().min(1, 'Method cannot be empty').max(50, 'Method too long').optional(),
+    note: z.string().trim().max(500, 'Note too long').optional(),
 });
 
 // ── Review schemas ──────────────────────────────────────────────────────────

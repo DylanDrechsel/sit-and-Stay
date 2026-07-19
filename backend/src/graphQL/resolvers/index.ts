@@ -9,6 +9,7 @@ import { businessResolvers } from './business/businessResolvers.js';
 import { jobResolvers } from './job/jobResolvers.js';
 import { reviewResolvers } from './review/reviewResolvers.js';
 import { serviceResolvers } from './service/serviceResolvers.js';
+import { financeResolvers } from './finance/financeResolvers.js';
 
 export default {
     Query: {
@@ -19,6 +20,7 @@ export default {
         ...jobResolvers.Query,
         ...reviewResolvers.Query,
         ...serviceResolvers.Query,
+        ...financeResolvers.Query,
     },
     Mutation: {
         ...invitationResolvers.Mutation,
@@ -30,6 +32,7 @@ export default {
         ...jobResolvers.Mutation,
         ...reviewResolvers.Mutation,
         ...serviceResolvers.Mutation,
+        ...financeResolvers.Mutation,
     },
     Job: jobResolvers.Job,
     Booking: jobResolvers.Booking,
@@ -40,6 +43,9 @@ export default {
     ServiceOffering: serviceResolvers.ServiceOffering,
     ServiceOfferingAddOn: serviceResolvers.ServiceOfferingAddOn,
     ServicePackage: serviceResolvers.ServicePackage,
+    LedgerEntry: financeResolvers.LedgerEntry,
+    EmployeeEarning: financeResolvers.EmployeeEarning,
+    Payout: financeResolvers.Payout,
     JSON: GraphQLJSON,
     DateTime: DateTimeScalar,
 };
