@@ -136,6 +136,7 @@ CREATE TABLE "Pet" (
     "vetName" TEXT,
     "vetClinic" TEXT,
     "vetPhone" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "Pet_pkey" PRIMARY KEY ("id")
 );
@@ -235,6 +236,8 @@ CREATE TABLE "Job" (
     "acceptedAt" TIMESTAMP(3),
     "declinedAt" TIMESTAMP(3),
     "assignedAt" TIMESTAMP(3),
+    "cancelledAt" TIMESTAMP(3),
+    "cancellationReason" TEXT,
     "distanceMeters" INTEGER,
     "specialInstructions" TEXT,
     "accessCode" TEXT,
@@ -418,6 +421,9 @@ CREATE UNIQUE INDEX "CustomerProfile_userId_key" ON "CustomerProfile"("userId");
 
 -- CreateIndex
 CREATE INDEX "customer_location_idx" ON "CustomerProfile" USING GIST ("location");
+
+-- CreateIndex
+CREATE INDEX "Pet_customerId_isActive_idx" ON "Pet"("customerId", "isActive");
 
 -- CreateIndex
 CREATE INDEX "Booking_businessId_idx" ON "Booking"("businessId");

@@ -75,9 +75,13 @@ export const setAvailability = async (
         const isAvailable = slot.isAvailable ?? true;
 
         // Only overwrite the stored window when new times were actually sent.
-        // Toggling a day off without times therefore preserves the hours
-        // already on the row, so switching it back on restores them instead of
-        // silently resetting the member to midnight-to-midnight.
+        // Toggling a day off (isAvailable: false) without times therefore
+        // preserves the hours already on the row instead of wiping them to
+        // midnight-to-midnight. Re-activating a day is not symmetric: this
+        // branch never sees isAvailable: true with times omitted, because
+        // availabilitySlotSchema's refine (validate.ts) requires startTime
+        // and endTime whenever isAvailable isn't false — a client turning a
+        // day back on must resend its hours.
         const update: { isAvailable: boolean; startTime?: string; endTime?: string } = { isAvailable };
         if (slot.startTime !== undefined) update.startTime = slot.startTime;
         if (slot.endTime !== undefined) update.endTime = slot.endTime;

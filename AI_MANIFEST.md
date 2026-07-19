@@ -106,6 +106,7 @@ pet_sitter_pro/
     │           │       ├── clockIn.ts
     │           │       ├── clockOut.ts
     │           │       ├── completeJob.ts
+    │           │       ├── cancelJob.ts             # per-role status rules (customer vs OWNER/MANAGER)
     │           │       ├── postJobUpdate.ts
     │           │       └── submitReportCard.ts
     │           ├── invitation/
@@ -703,7 +704,7 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 | `serviceOfferingId`  | String        | FK → `service_offerings.id`                |
 | `assigneeId`         | String?       | FK → `business_members.id`, optional       |
 | `status`             | JobStatus     | default `PENDING`                          |
-| `respondBy`          | DateTime?     | request-acceptance deadline ("RESPOND BY 7 PM") |
+| `respondBy`          | DateTime?     | request-acceptance deadline ("RESPOND BY 7 PM"). Set by `createBooking` to `min(now + 24h, earliest session start)` — one shared value across every job in the booking. **Advisory only:** nothing auto-expires it, since the app has no scheduler |
 | `sessionNumber`      | Int?          | position within a multi-session package ("walk **2** of 4") |
 | `totalSessions`      | Int?          | total sessions in the package ("walk 2 of **4**") |
 | `scheduledStartTime` | DateTime      |                                            |
@@ -713,6 +714,8 @@ The central operational entity connecting a Customer, Business, ServiceOffering,
 | `acceptedAt`         | DateTime?     | when the business accepted the request     |
 | `declinedAt`         | DateTime?     | when the business declined the request (pairs with `JobStatus.DECLINED`) |
 | `assignedAt`         | DateTime?     | when a sitter was assigned                 |
+| `cancelledAt`        | DateTime?     | when the job was called off (pairs with `JobStatus.CANCELLED`). Distinct from `declinedAt`: declined = the business never took the request; cancelled = an agreed job came off |
+| `cancellationReason` | String?       | optional free text shown on the cancelled job |
 | `distanceMeters`     | Int?          | route distance walked ("0.8 mi walked")    |
 | `specialInstructions`| String?       | optional customer notes                    |
 | `accessCode`         | String?       | **SENSITIVE** — per-job home access secret (e.g. lockbox code). Set by the customer per job, never stored on `Pet`. Resolvers must expose this only to the assigned sitter and an active OWNER/MANAGER of the job's business — never in public/list queries or logs |
@@ -998,6 +1001,7 @@ behavior sections below), not root operations.
 | `clockIn`           | `jobId: ID!`             | `Job!`             | Yes (assigned sitter only) | `resolvers/job/mutations/clockIn.ts` — `ASSIGNED → IN_PROGRESS`; sets `actualStartTime` |
 | `clockOut`          | `jobId: ID!`             | `Job!`             | Yes (assigned sitter only) | `resolvers/job/mutations/clockOut.ts` — `IN_PROGRESS → COMPLETED`; sets `actualEndTime` |
 | `completeJob`       | `jobId: ID!`             | `Job!`             | Yes (active OWNER/MANAGER) | `resolvers/job/mutations/completeJob.ts` — manual override, `ASSIGNED` or `IN_PROGRESS → COMPLETED`; backfills `actualStartTime` if clock-in never happened |
+| `cancelJob`         | `CancelJobInput`         | `Job!`             | Yes (the job's customer **or** an active OWNER/MANAGER — legal source states differ per role) | `resolvers/job/mutations/cancelJob.ts` — → `CANCELLED`; sets `cancelledAt` + optional `cancellationReason`. Cancels one session, not a whole booking. See `Job Resolver Behavior` below for the per-role matrix |
 | `leaveReview`       | `LeaveReviewInput`       | `Review!`          | Yes (job owner + job `COMPLETED`) | `resolvers/review/mutations/leaveReview.ts` — one review per job (enforced via `Review.jobId` uniqueness + an explicit pre-check); recomputes and writes `Business.avgRating`/`reviewCount` in the same transaction — see `Review Resolver Behavior` below |
 | `postJobUpdate`     | `PostJobUpdateInput`     | `JobUpdate!`       | Yes (assigned sitter only, job `IN_PROGRESS`) | `resolvers/job/mutations/postJobUpdate.ts` — at least one of `note`/`photoUrl` required |
 | `submitReportCard`  | `SubmitReportCardInput`  | `ReportCard!`      | Yes (assigned sitter only, job `COMPLETED`) | `resolvers/job/mutations/submitReportCard.ts` — one report card per job |
@@ -1033,6 +1037,7 @@ behavior sections below), not root operations.
 | `BookingSessionInput` | `scheduledStartTime`, `scheduledEndTime` | Both required datetime strings; `scheduledEndTime` must be after `scheduledStartTime` (Zod `.refine()`). One `Job` is created per entry in `CreateBookingInput.sessions`. |
 | `CreateBookingInput` | `businessId`, `serviceOfferingId`, `servicePackageId?`, `addOnIds?`, `petIds`, `sessions`, `specialInstructions?`, `accessCode?` | Zod schema (`createBookingSchema`) validates shapes/UUIDs; the resolver cross-checks against the DB that `sessions.length` matches the package's `sessionsCount` (or is exactly 1 for an ad-hoc booking with no package), that all `addOnIds` belong to the offering and are active, and that all `petIds` belong to the caller and are active. |
 | `AssignSitterInput` | `jobId`, `assigneeId` | Both UUIDs. `assigneeId` is the `BusinessMember.id`, not the `User.id` — same convention as `RemoveMemberInput.memberId`. |
+| `CancelJobInput` | `jobId`, `reason?` | Zod schema (`cancelJobSchema`). `reason` is optional but must be non-empty when present — an all-whitespace string is a mistake, not a deliberate blank. Max 500 chars. |
 | `LeaveReviewInput` | `jobId`, `rating`, `comment?`, `tags?` | Zod schema (`leaveReviewSchema`) requires `rating` between 1–5. `businessId`/`customerId` are deliberately not accepted — both are derived from the job. `tags` defaults to `[]` if omitted. |
 | `PostJobUpdateInput` | `jobId`, `note?`, `photoUrl?` | Zod schema (`postJobUpdateSchema`) requires at least one of `note`/`photoUrl` (object-level `.refine()`). |
 | `SubmitReportCardInput` | `jobId`, all other fields optional | Zod schema (`submitReportCardSchema`). `mood` must be a valid `PetMood` enum value if provided; omitted fields fall back to the model's Prisma defaults (`peeCount`/`poopCount` → `0`, the boolean flags → `false`). |
@@ -1186,12 +1191,40 @@ required starting state. Valid transitions:
 PENDING ──acceptJob──► ACCEPTED ──assignSitter──► ASSIGNED ──clockIn──► IN_PROGRESS ──clockOut──► COMPLETED
    │                                                  │
    └──declineJob──► DECLINED                          └──completeJob──► COMPLETED  (manual override)
+
+  PENDING | ACCEPTED | ASSIGNED | IN_PROGRESS ──cancelJob──► CANCELLED   (source state depends on caller)
 ```
 
 - `acceptJob` / `declineJob`: caller must be an active `OWNER`/`MANAGER` of the job's business. Set `acceptedAt`/`declinedAt` respectively.
 - `assignSitter`: caller must be an active `OWNER`/`MANAGER`. Validates `assigneeId` is an active `BusinessMember` of the **same** business as the job. Sets `assigneeId` + `assignedAt`.
 - `clockIn` / `clockOut`: caller must be the job's assigned sitter specifically — resolved by looking up the `BusinessMember` row at `job.assigneeId` and checking its `userId` matches the caller, not just any active member of the business. Set `actualStartTime`/`actualEndTime` respectively; `clockOut` also completes the job.
 - `completeJob`: caller must be an active `OWNER`/`MANAGER`. An escape hatch for when clock-in/out wasn't used — allowed from either `ASSIGNED` or `IN_PROGRESS`, and backfills `actualStartTime` with the current time if it was never set, so reporting never sees a completed job with no start time.
+
+**`cancelJob` is the only transition whose legal source states depend on the caller's role**, so the
+two sets live as named constants at the top of the resolver rather than a single status check:
+
+| Caller | May cancel from | Not from |
+|--------|-----------------|----------|
+| The job's customer | `PENDING`, `ACCEPTED`, `ASSIGNED` | `IN_PROGRESS` — the sitter is already at the home; stopping that is a phone call, not a self-serve button |
+| Active `OWNER`/`MANAGER` | `ACCEPTED`, `ASSIGNED`, `IN_PROGRESS` | `PENDING` — a business rejecting a request it never agreed to is `declineJob` → `DECLINED`, and the Requests inbox tabs depend on that staying distinct |
+| Assigned sitter | *nothing* | a sitter who can't work a job gets it reassigned; cancelling the customer's booking is the wrong remedy |
+
+`COMPLETED`/`CANCELLED`/`DECLINED` are terminal for everyone. Both roles are resolved
+**independently** rather than short-circuiting on the first match, because one person can be both the
+job's customer and an `OWNER`/`MANAGER` of the business fulfilling it (an owner booking their own
+team) — they get the union of what either role permits. Each refusal returns a specific message
+pointing at the action that *does* exist (`declineJob`, contacting the business) rather than a
+generic rejection. `assigneeId` is left in place on cancel: who was on the job still matters for the
+sitter's history and any future payout or cancellation-fee rule.
+
+**`respondBy`** is set by `createBooking` to `min(now + 24h, earliest session start)` — one shared
+deadline across every job in the booking, since the business accepts or declines a request as a unit
+and a package's later sessions shouldn't extend the time to answer for the first. It is capped at the
+earliest start because a response due after the walk was meant to happen is not a deadline. **Nothing
+enforces it.** There is no scheduler in this app, so a past-deadline request simply stays `PENDING`;
+`respondBy` is for display and sorting. If auto-expiry is wanted, add a background job — do *not*
+make `acceptJob` reject past-deadline requests, or expired ones become permanently stuck with no
+legal transition out.
 
 **`postJobUpdate` / `submitReportCard`** — both restricted to the job's assigned sitter specifically
 (same `BusinessMember`-lookup-plus-`userId`-match pattern as `clockIn`/`clockOut`, not "any active

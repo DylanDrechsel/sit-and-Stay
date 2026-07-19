@@ -449,6 +449,16 @@ export const updatePetSchema = z.object({
 
 const jobIdField = z.string().uuid('Invalid job ID');
 
+/**
+ * Validates input for cancelling a job. The reason is optional but, when
+ * given, must be non-empty — an all-whitespace string is a mistake, not a
+ * deliberate blank.
+ */
+export const cancelJobSchema = z.object({
+    jobId: jobIdField,
+    reason: z.string().trim().min(1, 'Reason cannot be empty').max(500, 'Reason too long').optional(),
+});
+
 const bookingSessionSchema = z.object({
     scheduledStartTime: z.coerce.date({ message: 'Invalid session start time' }),
     scheduledEndTime: z.coerce.date({ message: 'Invalid session end time' }),

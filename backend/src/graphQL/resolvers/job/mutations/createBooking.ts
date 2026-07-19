@@ -5,6 +5,18 @@ import type { GraphQLContext } from '../../../../types/context.js';
 import type { CreateBookingInput } from '../../../../types/booking.js';
 
 /**
+ * How long a business gets to accept or decline a new request before the
+ * deadline shown to the customer ("RESPOND BY 7 PM") elapses.
+ *
+ * Nothing enforces this: there is no scheduler in the app, so a request whose
+ * deadline passes just sits in PENDING rather than auto-expiring. It's an SLA
+ * for display and sorting, not a state transition. If auto-expiry is wanted
+ * later it needs a background job — don't make acceptJob reject past-deadline
+ * requests instead, or expired ones become permanently stuck with no way out.
+ */
+const RESPONSE_WINDOW_HOURS = 24;
+
+/**
  * createBooking
  *
  * Creates a Booking + its Job session(s) for the authenticated customer.
@@ -117,6 +129,15 @@ export const createBooking = async (
         });
     }
 
+    // One deadline for the whole booking, shared by every session. The business
+    // accepts or declines the request as a unit, and it's derived from the
+    // EARLIEST session start so a package's later dates can't buy extra time to
+    // answer for the first one. Capped at that start time too — a response due
+    // after the walk was meant to happen is no deadline at all.
+    const earliestStart = new Date(Math.min(...sessions.map((s) => s.scheduledStartTime.getTime())));
+    const windowCloses = new Date(Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000);
+    const respondBy = windowCloses < earliestStart ? windowCloses : earliestStart;
+
     const pricePerSessionNum = Number(pricePerSession);
     const addOnTotal = addOns.reduce(
         (sum, addOn) => sum + Number(addOn.pricePerSession) * (addOn.perSession ? sessionsCount : 1),
@@ -154,6 +175,7 @@ export const createBooking = async (
                     customerId: customer.id,
                     serviceOfferingId,
                     status: 'PENDING',
+                    respondBy,
                     sessionNumber: sessionsCount > 1 ? index + 1 : null,
                     totalSessions: sessionsCount > 1 ? sessionsCount : null,
                     scheduledStartTime: session.scheduledStartTime,

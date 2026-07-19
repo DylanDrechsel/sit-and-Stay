@@ -1,5 +1,6 @@
 const typeDefs = `#graphql
   scalar JSON
+  scalar DateTime
 
   # ── Types ──────────────────────────────────────────────────────────
 
@@ -11,7 +12,7 @@ const typeDefs = `#graphql
     phone: String
     avatarUrl: String
     globalRole: String!
-    createdAt: String!
+    createdAt: DateTime!
   }
 
   type Business {
@@ -27,7 +28,7 @@ const typeDefs = `#graphql
     serviceFeeAmount: Float
     avgRating: Float
     reviewCount: Int!
-    createdAt: String!
+    createdAt: DateTime!
   }
 
   # One business in a getNearbyBusinesses result, with the computed distance
@@ -55,7 +56,7 @@ const typeDefs = `#graphql
     id: ID!
     email: String!
     role: String!
-    expiresAt: String!
+    expiresAt: DateTime!
     isAccepted: Boolean!
   }
 
@@ -64,7 +65,7 @@ const typeDefs = `#graphql
     id: ID!
     role: String!        # OWNER | MANAGER | EMPLOYEE
     isActive: Boolean!
-    joinedAt: String!
+    joinedAt: DateTime!
     user: User!          # Full profile of the member
     # Recurring weekly schedule, Monday→Sunday. Lazily resolved, so it costs
     # nothing on queries that don't ask for it. Days never configured are simply
@@ -160,16 +161,18 @@ const typeDefs = `#graphql
     serviceOfferingId: ID!
     assigneeId: ID
     status: String!         # PENDING | ACCEPTED | ASSIGNED | IN_PROGRESS | COMPLETED | CANCELLED | DECLINED
-    respondBy: String
+    respondBy: DateTime
     sessionNumber: Int
     totalSessions: Int
-    scheduledStartTime: String!
-    scheduledEndTime: String!
-    actualStartTime: String
-    actualEndTime: String
-    acceptedAt: String
-    declinedAt: String
-    assignedAt: String
+    scheduledStartTime: DateTime!
+    scheduledEndTime: DateTime!
+    actualStartTime: DateTime
+    actualEndTime: DateTime
+    acceptedAt: DateTime
+    declinedAt: DateTime
+    assignedAt: DateTime
+    cancelledAt: DateTime
+    cancellationReason: String
     distanceMeters: Int
     specialInstructions: String
     # SENSITIVE — home access secret (e.g. lockbox code). Only visible to the
@@ -182,8 +185,8 @@ const typeDefs = `#graphql
     customer: CustomerProfile!
     service: ServiceOffering!
     assignee: BusinessMember
-    createdAt: String!
-    updatedAt: String!
+    createdAt: DateTime!
+    updatedAt: DateTime!
   }
 
   # The customer's checkout order — groups the Job(s) created for a package purchase
@@ -196,8 +199,8 @@ const typeDefs = `#graphql
     totalPrice: Float!
     jobs: [Job!]!
     addOns: [BookingAddOn!]!
-    createdAt: String!
-    updatedAt: String!
+    createdAt: DateTime!
+    updatedAt: DateTime!
   }
 
   # An add-on selected at checkout, with its price snapshotted at booking time
@@ -217,7 +220,7 @@ const typeDefs = `#graphql
     comment: String
     tags: [String!]!
     isPublic: Boolean!
-    createdAt: String!
+    createdAt: DateTime!
   }
 
   # A single timestamped update (photo and/or note) posted by the assigned
@@ -228,7 +231,7 @@ const typeDefs = `#graphql
     authorId: ID!
     note: String
     photoUrl: String
-    createdAt: String!
+    createdAt: DateTime!
   }
 
   # The end-of-job summary the sitter fills out — one per job
@@ -242,7 +245,7 @@ const typeDefs = `#graphql
     drankWater: Boolean!
     gaveTreat: Boolean!
     summary: String
-    createdAt: String!
+    createdAt: DateTime!
   }
 
   # One business member's assignment-availability status for a specific job's
@@ -498,6 +501,13 @@ const typeDefs = `#graphql
   # ── Job Activity inputs (JobUpdate / ReportCard) —————————
 
   # At least one of note/photoUrl must be provided
+  # reason is optional, but must be non-empty when given — it's stored on the
+  # job and surfaced on the cancelled request
+  input CancelJobInput {
+    jobId: ID!
+    reason: String
+  }
+
   input PostJobUpdateInput {
     jobId: ID!
     note: String
@@ -716,6 +726,14 @@ const typeDefs = `#graphql
     # Manually marks a job completed (OWNER/MANAGER only) — an override for when
     # clock-in/clock-out wasn't used. Allowed from ASSIGNED or IN_PROGRESS -> COMPLETED.
     completeJob(jobId: ID!): Job!
+
+    # Calls off a job. Cancels ONE session, not a whole booking.
+    #   Customer:       PENDING | ACCEPTED | ASSIGNED -> CANCELLED
+    #   OWNER/MANAGER:  ACCEPTED | ASSIGNED | IN_PROGRESS -> CANCELLED
+    # PENDING is customer-only (a business declines rather than cancels — see
+    # declineJob); IN_PROGRESS is business-only (the sitter is already on site).
+    # The assigned sitter cannot cancel — they ask a manager to reassign.
+    cancelJob(input: CancelJobInput!): Job!
 
     # ── Review mutations ————————————————————————
 

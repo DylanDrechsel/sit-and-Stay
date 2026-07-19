@@ -47,9 +47,15 @@ export const updatePet = async (
 
     const pet = await context.prisma.pet.findUnique({ where: { id: petId } });
 
-    if (pet == null || !pet.isActive || pet.customerId !== customer.id) {
+    if (pet == null || pet.customerId !== customer.id) {
         throw new GraphQLError('Pet not found.', {
             extensions: { code: 'NOT_FOUND' },
+        });
+    }
+
+    if (!pet.isActive) {
+        throw new GraphQLError('This pet has already been deleted.', {
+            extensions: { code: 'BAD_USER_INPUT' },
         });
     }
 

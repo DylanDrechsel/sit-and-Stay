@@ -396,6 +396,10 @@ model Job {
   acceptedAt          DateTime?       // business accepted the request
   declinedAt          DateTime?       // business declined the request
   assignedAt          DateTime?       // a sitter was assigned
+  // Cancellation is distinct from DECLINED: declined means the business never took
+  // the request, cancelled means an agreed job was called off. Both are terminal.
+  cancelledAt         DateTime?
+  cancellationReason  String?         // free text surfaced on the cancelled job
   distanceMeters      Int?            // route distance walked during the job ("0.8 mi walked so far")
   specialInstructions String?
 

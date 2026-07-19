@@ -1,4 +1,5 @@
 import GraphQLJSON from 'graphql-type-json';
+import { DateTimeScalar } from '../scalars.js';
 import { invitationResolvers } from './invitation/invitationResolvers.js';
 import { ownerResolvers } from './owner/ownerResolvers.js';
 import { customerResolvers } from './customer/customerResolvers.js';
@@ -40,4 +41,5 @@ export default {
     ServiceOfferingAddOn: serviceResolvers.ServiceOfferingAddOn,
     ServicePackage: serviceResolvers.ServicePackage,
     JSON: GraphQLJSON,
+    DateTime: DateTimeScalar,
 };
