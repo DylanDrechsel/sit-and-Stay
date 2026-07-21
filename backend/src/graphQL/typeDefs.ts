@@ -57,6 +57,29 @@ const typeDefs = `#graphql
     business: Business!
   }
 
+  # Everything a client needs at sign-in to decide what to render.
+  #
+  # "Staff?" and "customer?" are two independent facts, so they are two separate
+  # fields rather than one role string — all four combinations are reachable, and
+  # a single value can't carry them. In particular a user can have neither: an
+  # owner from registerOwner (which creates no CustomerProfile) whose membership
+  # was later soft-removed by removeMember has no active membership AND no
+  # profile, so "not staff" must never be read as "therefore a customer".
+  #
+  # Which context to land in is deliberately left to the client — that is a UI
+  # routing decision, and baking it in here would mean a schema change to alter it.
+  type Session {
+    user: User!
+    # Active memberships only; a soft-removed member keeps their row but gets no
+    # business access. A list, not a single role: a user can be staff at more
+    # than one business, and can be staff and a customer at the same time.
+    memberships: [BusinessMember!]!
+    # Null when this user has never booked. This is the only way to learn it —
+    # User has no customer link, CustomerProfile has no root query, and an empty
+    # getMyPets can't distinguish "no profile" from "profile with no pets".
+    customerProfile: CustomerProfile
+  }
+
   type Invitation {
     id: ID!
     email: String!
@@ -81,6 +104,11 @@ const typeDefs = `#graphql
     # nothing on queries that don't ask for it. Days never configured are simply
     # absent from the list — see setAvailability.
     availability: [EmployeeAvailability!]!
+    # The business this membership is in. Lazily resolved and reuses an already
+    # -included business when the parent query fetched one, so getSession can ask
+    # for it across every membership without an extra query per row, while
+    # queries already scoped to one business don't pay for the join at all.
+    business: Business!
   }
 
   # One day of a member's recurring weekly schedule. This is the data
@@ -647,6 +675,15 @@ const typeDefs = `#graphql
     # Returns the currently authenticated user (requires JWT)
     getMe: User!
 
+    # One call at sign-in: identity, every active membership (each with its role
+    # and business), and the customer profile if there is one. Re-run it after a
+    # role change to refresh what the client is allowed to show (requires JWT).
+    #
+    # Job lists are deliberately absent — they are unbounded, mean something
+    # different per role, and change constantly. Screens fetch their own filtered
+    # slice through getMyJobs / getBusinessJobs / getMyBookings.
+    getSession: Session!
+
     # Looks up any user by their UUID (requires JWT)
     getUserById(userId: ID!): User!
 
@@ -703,6 +740,13 @@ const typeDefs = `#graphql
 
     # Returns the authenticated customer's bookings, newest first (requires JWT + CustomerProfile)
     getMyBookings: [Booking!]!
+
+    # Returns the caller's own jobs (customer role, requires JWT + CustomerProfile),
+    # flattened across every booking rather than nested under one — the "what's
+    # coming up" list for the customer Home screen. Same statuses/from/to filters
+    # as getMyJobs/getBusinessJobs; pass from: <today> for exactly "current date
+    # and forward". Omitting both returns full job history instead.
+    getMyUpcomingJobs(statuses: [String!], from: String, to: String): [Job!]!
 
     # Returns a business's jobs for the dashboard/requests/schedule views (OWNER/MANAGER only).
     # statuses filters to those JobStatus values; from/to bound scheduledStartTime.

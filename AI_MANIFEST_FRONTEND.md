@@ -15,21 +15,29 @@
 
 ## 1. Current Status — Read This First
 
-**The app is a fresh Expo template plus installed dependencies. Almost nothing is built yet.**
+**One static screen exists. There is no networking, navigation, auth, or state management yet.**
 
 What exists today:
 
 | Path | State |
 |------|-------|
-| `App.tsx` | Untouched Expo boilerplate ("Open up App.tsx to start working on your app!") |
+| `App.tsx` | Loads the six Sora/Manrope weights via `useFonts`, then renders `WelcomeScreen` directly. Holds on a brand-coloured `View` while fonts load rather than flashing white. |
 | `index.ts` | `registerRootComponent(App)` — standard, don't edit |
 | `app.json` | Expo config; `expo-font` registered under `plugins` |
 | `tsconfig.json` | Extends `expo/tsconfig.base`, `strict: true` |
 | `assets/` | Default icons/splash from the template |
-| `src/` | **Does not exist yet** |
+| `src/theme/colors.ts` | Design-system palette (§9) |
+| `src/theme/typography.ts` | Font-family constants. Every family here must also be registered in `App.tsx`'s `useFonts` call or `Text` silently falls back to the system font. |
+| `src/components/PawMark.tsx` | Logo mark |
+| `src/screens/auth/WelcomeScreen.tsx` | Sign-in landing screen. The Apple and Google buttons are **deliberately inert `View`s, not `Pressable`s** — the API has no OAuth mutation, and `login` rejects accounts with a null `passwordHash`, which is exactly what a social account would be. "Continue with email" takes an optional `onContinueWithEmail` prop that nothing passes yet. |
 
-Do not assume any screen, provider, navigator, or helper described below exists. Check the
-filesystem first.
+Everything else below is **PLANNED**. There is no `src/lib/`, `src/graphql/`, `src/context/`,
+`src/navigation/`, `src/types/`, or `src/validation/` — no Apollo client, no token storage, no
+navigator. Check the filesystem before assuming any provider or helper exists.
+
+> **Sequencing decision (2026-07-21):** the backend is being finished and verified first; the app is
+> deliberately not being built out against it yet. Do not add screens, providers, or GraphQL
+> documents to `phone_app/` until that changes — see §8 for the one backend fix this depends on.
 
 ---
 
@@ -42,7 +50,8 @@ filesystem first.
 | UI Library | React 19.2.3 |
 | Language | TypeScript 6 (`strict: true`) |
 | API Client | Apollo Client 4 (`@apollo/client ^4.2.7`) + `graphql 16` |
-| Navigation | React Navigation 7 (`native-stack` + `bottom-tabs`) |
+| Navigation | React Navigation 7 (`native-stack` + `bottom-tabs`), on `react-native-screens` |
+| Safe areas | `react-native-safe-area-context` — `SafeAreaProvider` wraps the tree in `App.tsx` |
 | Forms | React Hook Form 7 + `@hookform/resolvers` |
 | Validation | Zod 4 (mirrors the backend's `utils/validate.ts`) |
 | Secure Storage | `expo-secure-store` (JWT) — **native only, see §6** |
@@ -70,11 +79,21 @@ Current (real):
 
 ```
 phone_app/
-├── App.tsx                      # Root component — still boilerplate
+├── App.tsx                      # useFonts + renders WelcomeScreen
 ├── index.ts                     # registerRootComponent, do not edit
 ├── app.json                     # Expo config (plugins: expo-font)
 ├── tsconfig.json                # extends expo/tsconfig.base, strict
-└── assets/                      # icons + splash
+├── AGENTS.md                    # read the SDK 57 docs before writing Expo code
+├── assets/                      # icons + splash
+└── src/
+    ├── components/
+    │   └── PawMark.tsx
+    ├── screens/
+    │   └── auth/
+    │       └── WelcomeScreen.tsx
+    └── theme/
+        ├── colors.ts
+        └── typography.ts
 ```
 
 **PLANNED** layout under `src/` — create these as you need them, not upfront:
@@ -141,8 +160,8 @@ The backend must be running separately (`npm run dev` from `backend/`, plus
 - **CORS on web only.** The browser enforces CORS; native `fetch` does not. The backend whitelist
   in `backend/src/server.ts` must contain the Expo web origin (`http://localhost:8081`) or every
   request fails as a bare `TypeError: Failed to fetch` with no status code — which looks nothing
-  like an auth error. **As of this writing `localhost:8081` is NOT in that whitelist.** Add it
-  before using the web preview against a live API.
+  like an auth error. `localhost:8081` **is** in that whitelist as of `server.ts:33`. If you ever
+  serve Metro on a different port, add that origin too.
 - After adding a package, restart with `-c`. Most "module not found" weirdness is a stale cache.
 
 ---
@@ -221,16 +240,44 @@ Consequences for the app:
 3. Authorization is always re-checked server-side. Client-side role logic is for *presentation
    only*; never treat a hidden button as a security boundary.
 
-### ⚠️ Known gap: `getMyBusinesses` does not return your role
+### ✅ Resolved: use `getSession` to build the session context
 
-`getMyBusinesses` is declared `[Business!]!` and its resolver does
-`memberships.map((m) => m.business)` — it reads `BusinessMember` and then **discards the role**.
-So the app can learn *which* businesses you belong to but not whether you are an OWNER, MANAGER, or
-EMPLOYEE in each — precisely the fact the whole role-based UI branches on.
+**This is the query the session context should be built on.** One call after login returns
+everything needed to decide what to render:
 
-Fix before building the session context: return `[BusinessMember!]!` (which already carries `role`,
-`isActive`, `joinedAt`) and add a `business: Business!` field to the `BusinessMember` GraphQL type,
-lazily resolved so member-queries already scoped to one business don't pay for the join.
+```graphql
+query GetSession {
+  getSession {
+    user { id firstName lastName email avatarUrl }
+    memberships {
+      id
+      role                 # OWNER | MANAGER | EMPLOYEE
+      joinedAt
+      business { id name heroPhotoUrl city }
+    }
+    customerProfile { id address city }
+  }
+}
+```
+
+Read it as **two independent facts**, never one:
+
+- **Staff?** → `memberships.length > 0`, and each entry carries its own `role`, so a user who is a
+  MANAGER at one business and an EMPLOYEE at another is represented correctly.
+- **Customer?** → `customerProfile != null`.
+
+**`memberships` being empty does not mean the user is a customer.** An owner created by
+`registerOwner` (which makes no `CustomerProfile`) and later soft-removed by `removeMember` has
+neither — check `customerProfile` on its own. A `User.isBusinessMember` boolean was considered for
+this and rejected precisely because it collapses the two facts into one and gets that case wrong.
+
+Which context to land in is a **client** decision — the API deliberately doesn't pick for you, so
+the context switcher in point 2 above is where that logic belongs. Re-run `getSession` after
+anything that changes a role.
+
+> `getMyBusinesses` still returns `[Business!]!` and still discards the role. It was left alone
+> rather than broken, since `getSession` covers the role-aware case. Use `getSession` whenever the
+> role matters.
 
 ---
 

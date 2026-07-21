@@ -65,6 +65,7 @@ pet_sitter_pro/
     │   │   ├── registration.ts    # RegisterCustomerInput, RegisterOwnerInput
     │   │   ├── review.ts          # LeaveReviewInput
     │   │   ├── service.ts         # service CRUD inputs + ServiceOffering/AddOn/Package parent shapes
+    │   │   ├── finance.ts         # payout/earnings inputs + LedgerEntry/EmployeeEarning/Payout parent shapes
     │   │   └── user.ts            # UpdateUserInput, ChangePasswordInput, ChangeEmailInput
     │   ├── utils/
     │   │   ├── generatePrisma.ts  # Prisma singleton using pg.Pool + PrismaPg adapter
@@ -75,7 +76,8 @@ pet_sitter_pro/
     │   │   │                      #   settleEarningsIntoPayout. Nothing else writes money tables.
     │   │   └── validate.ts        # Zod schemas for all inputs + formatZodError helper
     │   └── graphQL/
-    │       ├── typeDefs.ts        # GraphQL schema (SDL)
+    │       ├── typeDefs.ts        # GraphQL schema (SDL) — 27 queries, 40 mutations
+    │       ├── scalars.ts         # DateTimeScalar (ISO 8601 out; ISO string or epoch-ms in)
     │       └── resolvers/
     │           ├── index.ts       # Merges all domain resolver maps
     │           ├── owner/
@@ -98,6 +100,7 @@ pet_sitter_pro/
     │           │   ├── queries/
     │           │   │   ├── getAvailableEmployees.ts
     │           │   │   ├── getMyBookings.ts
+    │           │   │   ├── getMyUpcomingJobs.ts  # customer's flattened job list, from/to on scheduledStartTime
     │           │   │   ├── getBusinessJobs.ts
     │           │   │   ├── getMyJobs.ts
     │           │   │   ├── getJob.ts
@@ -111,6 +114,7 @@ pet_sitter_pro/
     │           │       ├── clockOut.ts
     │           │       ├── completeJob.ts
     │           │       ├── cancelJob.ts             # per-role status rules (customer vs OWNER/MANAGER)
+    │           │       ├── addTip.ts                # one-shot, final — no reversal flow
     │           │       ├── postJobUpdate.ts
     │           │       └── submitReportCard.ts
     │           ├── invitation/
@@ -123,6 +127,7 @@ pet_sitter_pro/
     │           │   ├── userResolvers.ts
     │           │   ├── queries/
     │           │   │   ├── getMe.ts
+    │           │   │   ├── getSession.ts        # sign-in bootstrap — identity + memberships + customer profile
     │           │   │   └── getUserById.ts
     │           │   └── mutations/
     │           │       ├── changeEmail.ts
@@ -140,6 +145,7 @@ pet_sitter_pro/
     │           │       ├── removeMember.ts
     │           │       ├── setAvailability.ts       # write side for getAvailableEmployees
     │           │       ├── setBusinessLocation.ts   # $executeRaw — Prisma can't write Unsupported columns
+    │           │       ├── setMemberPayRate.ts      # OWNER-only, stricter than removeMember
     │           │       └── updateBusiness.ts
     │           ├── review/
     │           │   ├── reviewResolvers.ts
@@ -256,7 +262,12 @@ The database persists data in a Docker named volume (`pgdata`) so data survives 
 - `http://localhost:5001/graphql`
 - `http://localhost:8000`
 - `http://localhost:8080`
+- `http://localhost:8081` — Expo web preview (`npx expo start --web`)
 - `https://studio.apollographql.com`
+
+> CORS only affects the Expo **web** preview; native `fetch` on a device or simulator ignores it
+> entirely. A missing origin here surfaces as a bare `TypeError: Failed to fetch` with no status
+> code, which looks nothing like an auth error.
 
 ---
 
@@ -1077,7 +1088,8 @@ back computed/gated/lazy fields (see the per-domain behavior sections below), no
 | `healthCheck` | none            | `String`           | No            | `resolvers/index.ts`                   |
 | `getMe`       | none            | `User!`            | Yes (JWT)     | `resolvers/user/queries/getMe.ts`      |
 | `getUserById` | `userId: ID!`   | `User!`            | Yes (JWT)     | `resolvers/user/queries/getUserById.ts`|
-| `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` — returns active memberships only |
+| `getSession`  | none            | `Session!`         | Yes (JWT)     | `resolvers/user/queries/getSession.ts` — sign-in bootstrap: identity + active memberships + customer profile |
+| `getMyBusinesses`   | none      | `[Business!]!`     | Yes (JWT)     | `resolvers/business/queries/getMyBusinesses.ts` — active memberships only; **discards `role`**, use `getSession` when the role matters |
 | `getBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getBusinessMembers.ts` |
 | `getInactiveBusinessMembers`| `businessId: ID!` | `[BusinessMember!]!` | Yes (JWT + active member) | `resolvers/business/queries/getInactiveBusinessMembers.ts` |
 | `getNearbyBusinesses` | `latitude: Float!, longitude: Float!, radiusMiles: Float, category: String, search: String, limit: Int` | `[NearbyBusiness!]!` | No | `resolvers/business/queries/getNearbyBusinesses.ts` — PostGIS `$queryRaw`; see `Business Resolver Behavior` below |
@@ -1085,6 +1097,7 @@ back computed/gated/lazy fields (see the per-domain behavior sections below), no
 | `getBusinessReviews` | `businessId: ID!` | `[Review!]!` | No | `resolvers/review/queries/getBusinessReviews.ts` — public-profile data; returns only `isPublic: true` reviews, ordered by `createdAt` descending |
 | `getAvailableEmployees` | `jobId: ID!` | `[EmployeeAvailabilityStatus!]!` | Yes (active OWNER/MANAGER) | `resolvers/job/queries/getAvailableEmployees.ts` — see `Job Resolver Behavior` below for the availability + conflict-check algorithm |
 | `getMyBookings` | none | `[Booking!]!` | Yes (JWT + CustomerProfile) | `resolvers/job/queries/getMyBookings.ts` — caller's bookings, newest first; per-session detail via the lazy `Booking.jobs` field |
+| `getMyUpcomingJobs` | `statuses: [String!], from: String, to: String` | `[Job!]!` | Yes (JWT + CustomerProfile) | `resolvers/job/queries/getMyUpcomingJobs.ts` — caller's own jobs flattened across every booking (not nested under one); same filters as `getMyJobs`/`getBusinessJobs`, scoped by `Job.customerId` instead of `assigneeId`/`businessId` |
 | `getBusinessJobs` | `businessId: ID!, statuses: [String!], from: String, to: String` | `[Job!]!` | Yes (active OWNER/MANAGER) | `resolvers/job/queries/getBusinessJobs.ts` — dashboard/requests/schedule views; `statuses` filters, `from`/`to` bound `scheduledStartTime`; ordered by `scheduledStartTime` asc |
 | `getMyJobs` | `statuses: [String!], from: String, to: String` | `[Job!]!` | Yes (JWT) | `resolvers/job/queries/getMyJobs.ts` — jobs assigned to the caller across all their **active** memberships (deactivated membership = excluded); same filters as `getBusinessJobs` |
 | `getJob` | `jobId: ID!` | `Job!` | Yes (job's customer, assigned sitter, or active OWNER/MANAGER) | `resolvers/job/queries/getJob.ts` — access via shared `assertJobViewAccess` (`job/jobAccess.ts`) |
@@ -1233,11 +1246,60 @@ The resolver enforces them **conditionally** after checking the invitation email
 In both cases the invitation is marked `isAccepted: true` and a JWT is returned.
 If the existing user is already an active member of that business, a `BAD_USER_INPUT` error is thrown.
 
+### User Resolver Behavior
+
+- `getMe` returns the authenticated user's own row and nothing else. `User` is a flat identity
+  record — it has no `memberships` or `customer` link — so `getMe` alone cannot tell a client what
+  the user is allowed to do. Use `getSession` for that.
+- `getSession` is the **sign-in bootstrap**: one call returning `user`, every active `membership`
+  (each carrying its `role` and, lazily, its `business`), and `customerProfile` (null if the user has
+  never booked). Re-run it after anything that changes a role.
+
+  **Staff-ness and customer-ness are two independent fields, not one role string**, because all four
+  combinations are reachable and a single value can't carry them:
+
+  | Active membership | CustomerProfile | Example |
+  |---|---|---|
+  | yes | yes | a customer who is also a MANAGER (`customer.test1` in the test data) |
+  | yes | no  | any owner from `registerOwner` — it creates no `CustomerProfile` |
+  | no  | yes | an ordinary customer |
+  | no  | no  | an owner later soft-removed by `removeMember` |
+
+  That last row is why **an empty `memberships` must never be read as "therefore a customer"** —
+  clients check `customerProfile` separately. It is also why a `User.isBusinessMember` boolean was
+  considered and rejected: one flag can't express the table, `false` doesn't imply "customer", and a
+  stored column would need maintaining at every `BusinessMember` write site (`registerOwner`,
+  `acceptInvitation`, `removeMember`, `setMemberPayRate`) with the same drift risk as
+  `Business.avgRating`. If a cheap shorthand is ever wanted, add it as a **computed** field resolver,
+  not a column.
+
+  **Verified against a live server** in `TEST_DATA_AND_RESPONSES.md` §43 — rows 1–3 of the table
+  above are each confirmed with a real account, including the dual-role case (row 1) returning both
+  facts simultaneously rather than one clobbering the other. Row 4 (an owner, soft-removed) remains
+  unverified — see that section's Notes for why.
+
+  Which context to land the user in is deliberately **not** decided here — that is UI routing, and
+  encoding it in the API would mean a schema change to alter it. Job lists are likewise absent: they
+  are unbounded and role-dependent, so screens fetch their own slice via
+  `getMyJobs`/`getBusinessJobs`/`getMyBookings`.
+- `updateUser`, `changePassword`, and `changeEmail` are the self-service mutations; each acts only on
+  the caller's own record.
+
 ### Business Resolver Behavior
 
 The following handlers are implemented and registered through `resolvers/business/`.
 
 - `getMyBusinesses` returns every business where the authenticated user has an active membership, ordered by `joinedAt` ascending.
+  > **Note:** this resolver does `memberships.map((m) => m.business)`, so it **discards the role** —
+  > callers learn *which* businesses they belong to but not whether they are an OWNER, MANAGER, or
+  > EMPLOYEE in each. That was once going to be fixed by changing its return type to
+  > `[BusinessMember!]!`, but `getSession` now covers the role-aware case instead, so this query was
+  > deliberately left alone rather than broken. **Use `getSession` for anything that needs the role**;
+  > reach for this only if you genuinely just want a list of businesses.
+- `BusinessMember.business` (type-level, `businessResolvers.ts`) resolves the membership's business.
+  It checks `parent.business` first and only queries when the parent didn't `include` it — `getSession`
+  does include it, so asking for it across every membership costs no extra queries, while
+  member-queries already scoped to one business still pay nothing for a field they don't select.
 - `getBusinessMembers` accepts any active business member role and returns active members with their user profile, ordered by `joinedAt` ascending.
 - `getInactiveBusinessMembers` accepts any active business member role and returns inactive members with their user profile, ordered by `joinedAt` ascending.
 - `updateBusiness` permits only an active OWNER or MANAGER of the target business. It applies a partial update and treats an empty description as `null`.
@@ -1295,6 +1357,11 @@ The following handlers are implemented and registered through `resolvers/job/`.
 
 **Listing/lookup queries** — the read side that makes the lifecycle mutations reachable:
 - `getMyBookings` (customer): bookings for the caller's `CustomerProfile`, newest first.
+- `getMyUpcomingJobs` (customer): the same caller's jobs, but flattened to `[Job!]!` instead of
+  nested under each `Booking` — a multi-session package's 5 jobs come back as 5 peers, not buried
+  three levels deep. Same `statuses`/`from`/`to` filters as `getMyJobs`/`getBusinessJobs`, scoped by
+  `Job.customerId`; pass `from: <today>` for exactly a "what's coming up" list. The name describes
+  the intended use, not a server-side restriction — omitting `from`/`to` returns full history.
 - `getBusinessJobs` (active OWNER/MANAGER): a business's jobs, optional `statuses` filter (e.g.
   `["PENDING"]` = the requests inbox) and `from`/`to` window on `scheduledStartTime` (the day/week
   schedule). Ordered by `scheduledStartTime` ascending. EMPLOYEEs are refused — they use `getMyJobs`.

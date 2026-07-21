@@ -84,4 +84,11 @@ export interface BusinessMemberParent {
     userId: string;
     businessId: string;
     payRatePercent: unknown;
+    // Present only when the parent query include:d the relation — getSession
+    // does, so its `business` field resolver can short-circuit instead of
+    // re-querying per membership. Left opaque on purpose: the resolver hands it
+    // straight to the Business type, whose own field map owns the Decimal
+    // conversion, so modelling the columns again here would just be a second
+    // copy to keep in sync.
+    business?: object | null;
 }

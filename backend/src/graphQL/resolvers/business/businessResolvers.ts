@@ -80,6 +80,15 @@ export const businessResolvers = {
                 orderBy: { dayOfWeek: 'asc' },
             }),
 
+        // Lazy like `availability`, but checks the parent first: getSession
+        // include:s the business on every membership it returns, and without
+        // this short-circuit asking for it there would fire one query per row
+        // for data already in hand. Queries that don't include it (and don't ask
+        // for this field) still pay nothing.
+        business: (parent: BusinessMemberParent, _args: unknown, context: GraphQLContext) =>
+            parent.business ??
+            context.prisma.business.findUniqueOrThrow({ where: { id: parent.businessId } }),
+
         // SENSITIVE — gated the same way as Job.accessCode: resolved here rather
         // than as a plain schema field so the rule holds no matter which query
         // surfaced this member, including nested selections like

@@ -2,10 +2,18 @@
 
 ## Overview
 
-Every operation in the GraphQL API — 20 queries and 37 mutations, 57 total — has been exercised
+The GraphQL API declares **27 queries and 40 mutations, 67 total**, and **all 67 have been exercised**
 against a running local server and verified to work correctly. This file is a quick orientation
 summary of what exists and what was covered. Full request/response pairs, every key ID, and all
 negative-case results live in `TEST_DATA_AND_RESPONSES.md`.
+
+> **Correction:** an earlier version of this file claimed the 8 finance/payment operations
+> (`getBusinessLedger`, `getBusinessFinancialSummary`, `getUnpaidEarningsByMember`,
+> `getBusinessEarnings`, `getMyEarnings`, `setMemberPayRate`, `addTip`, `recordPayout`) were
+> untested. That was wrong — it was based on this file's own "What Was Tested" prose never
+> mentioning them, without actually checking `TEST_DATA_AND_RESPONSES.md` §42, which covers all 8 in
+> depth (happy paths, every documented negative case, and concurrency tests for the two mutations
+> that claim race-safety). Confirmed by reading §42 directly on 2026-07-21.
 
 ## Test Accounts
 
@@ -51,6 +59,34 @@ in their dual role. `avgRating: 5`, `reviewCount: 1`.
 - Full job lifecycle — booking → accept/decline → assign → clock in/out → report card → review
 - Job cancellation — every legal combination of caller role (customer, owner/manager) and source job status, including a dual-role account
 - Business membership management — removing a member, viewing inactive members
+- Employee pay & payouts — pay rate configuration, job-completion financials on both paths to
+  `COMPLETED`, tips (including a real concurrent-request race test), earnings/ledger reads with
+  pagination, and payouts (including `throughDate` cutoff and a concurrent-payout race test)
+- `getSession` — the sign-in bootstrap query. Tested across all three reachable staff/customer
+  combinations: staff-only (owner, manager, employee — each correctly gets a null
+  `customerProfile`), customer-only (the Outsider account), and **both at once** (`customer.test1`,
+  the dual-role account — confirming the two independent fields don't clobber each other). Also
+  confirmed the new `BusinessMember.business` field resolver carries through the existing
+  `defaultSitterPayPercent` sensitivity gate and `Decimal`→`Number` conversion correctly.
+- `getMyUpcomingJobs` — the customer's flattened "what's coming up" list. Cross-checked against
+  `getMyBookings`' nested jobs (identical 13-job set, just re-sorted), then verified the `from`
+  cutoff excludes exactly the one past-dated job, the `to` bound and `statuses` filter both land
+  precisely, and all three negative cases (`FORBIDDEN` for a non-customer, `UNAUTHENTICATED`,
+  `BAD_USER_INPUT` for a bad date) behave correctly.
+
+## What Was *Not* Tested
+
+- **`getSession`'s fourth combination — no active membership *and* no `CustomerProfile`.** This is
+  the "removed owner" case: `registerOwner` creates no profile, `removeMember` only soft-deletes, so
+  a removed owner has neither. Reaching it needs a fresh `BusinessMember` that can actually be
+  removed (an OWNER's can't), which means `inviteEmployee` → `acceptInvitation` — and the invitation
+  token is only `console.log`'d (no SMTP configured), landing in the server process's own stdout
+  rather than anywhere this testing pass could read it. See `TEST_DATA_AND_RESPONSES.md` §43 Notes.
+- **Creating a `BONUS` or `ADJUSTMENT` `EmployeeEarning` directly** — both enum values are
+  schema-only; no mutation creates one, so there's nothing to call yet.
+- **`getMyUpcomingJobs` with `statuses` combined with `from`/`to` in the same call, or pagination.**
+  Each filter was tested independently; the query has no `limit`/cursor at all, by design, matching
+  its two siblings. Low-risk gap — see `TEST_DATA_AND_RESPONSES.md` §44 Notes.
 
 ## Where to Look for More
 
