@@ -25,19 +25,19 @@ Grab a valid JWT here instead of re-running `login`. **Tokens expire** (`JWT_EXP
 `isActive: true` as of §42). `defaultSitterPayPercent: 50`. Employee `cc28c51f-3c59-4c44-9cea-cf881b468533`
 has a `payRatePercent` override of `70`. Current ledger balance after §42: **$22.50**.
 
-**Current JWTs** (use as `Authorization: Bearer <token>`) — all five re-logged-in/registered fresh
-for the §42 finance testing pass; the tokens previously logged here had expired:
+**Current JWTs** (use as `Authorization: Bearer <token>`) — all five re-logged-in fresh for the §43
+`getSession` testing pass; the tokens previously logged here had expired (`JWT_EXPIRES_IN=1d`):
 
 - **Owner**:
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwYmZhZmYwMS03ZTJmLTRiNjAtODExYi0wNGI5OTA5Mjg1YWUiLCJlbWFpbCI6Im93bmVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjU0MCwiZXhwIjoxNzg0NTg4OTQwfQ.KTf3p5IxKsI1B2IqYc7XQjRp66rcNRYQ4oiP1FKoxEI`
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwYmZhZmYwMS03ZTJmLTRiNjAtODExYi0wNGI5OTA5Mjg1YWUiLCJlbWFpbCI6Im93bmVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDY2MDk4OSwiZXhwIjoxNzg0NzQ3Mzg5fQ.slZSgo2Tz-SCmg8AsfJaP9SpT3HH1zFhqbhMZJWYo3Q`
 - **Manager**:
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyMGJlNjBmMC03ZDk5LTQ3MGMtYWQyNC1lOGRkZDEzMTQyNDEiLCJlbWFpbCI6Im1hbmFnZXIudGVzdDFAcGV0c2l0dGVycHJvLmRldiIsImdsb2JhbFJvbGUiOiJVU0VSIiwiaWF0IjoxNzg0NTAyNTQxLCJleHAiOjE3ODQ1ODg5NDF9.8cj504vvFGjC05_EYA6EVATYBd0nMctzQQT4Bidk6kE`
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyMGJlNjBmMC03ZDk5LTQ3MGMtYWQyNC1lOGRkZDEzMTQyNDEiLCJlbWFpbCI6Im1hbmFnZXIudGVzdDFAcGV0c2l0dGVycHJvLmRldiIsImdsb2JhbFJvbGUiOiJVU0VSIiwiaWF0IjoxNzg0NjYwOTkyLCJleHAiOjE3ODQ3NDczOTJ9.1IgzkN5oERB3dvSE3xYpb08KdCFFfA7NmYAtn-mZJ5Q`
 - **Employee**:
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjYTdhYTY4OC00NDI2LTQ1MWMtOGVkNy04YjE3YmFiZTAzNjMiLCJlbWFpbCI6ImVtcGxveWVlLm5ld2VtYWlsQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjU0MSwiZXhwIjoxNzg0NTg4OTQxfQ.8i0LfbGAroGZFS7maIisfCxTXB6qXIRxwu1J_PLu0uk`
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjYTdhYTY4OC00NDI2LTQ1MWMtOGVkNy04YjE3YmFiZTAzNjMiLCJlbWFpbCI6ImVtcGxveWVlLm5ld2VtYWlsQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDY2MDk5NSwiZXhwIjoxNzg0NzQ3Mzk1fQ.gQFMSlcE9tCniiG8fK01ysZRBaVO-YUUTFPvN4psFxs`
 - **Customer**:
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3MDY1YTNmOS1hZWM2LTRkNjYtYTlmNS1lMDVjZjE4MzkyYWMiLCJlbWFpbCI6ImN1c3RvbWVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjU0MSwiZXhwIjoxNzg0NTg4OTQxfQ.budbTB7th10JOp_fRnOeqoXy9ONe7zs-JpDSKSQ-X58`
-- **Outsider** (throwaway, registered in §42):
-  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI0NzE1NjVlNi00ZmI3LTQ2NGEtOTg0NS02Y2ZjOTcxNWZmZTkiLCJlbWFpbCI6Im91dHNpZGVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDUwMjgxMiwiZXhwIjoxNzg0NTg5MjEyfQ.CK5_5PBGuMlTfeiTRUzNktUW21FYGVg1iylj9Qk-9pU`
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3MDY1YTNmOS1hZWM2LTRkNjYtYTlmNS1lMDVjZjE4MzkyYWMiLCJlbWFpbCI6ImN1c3RvbWVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDY2MDk5OCwiZXhwIjoxNzg0NzQ3Mzk4fQ.jYuBxcOkwSPyBRLNgQMl-HizLwP2bXwfvUfwaUSAlLY`
+- **Outsider** (throwaway, confirmed in §43 to be a plain customer via `registerCustomer` — no business affiliation, but does have a `CustomerProfile`):
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI0NzE1NjVlNi00ZmI3LTQ2NGEtOTg0NS02Y2ZjOTcxNWZmZTkiLCJlbWFpbCI6Im91dHNpZGVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDY2MDk5OSwiZXhwIjoxNzg0NzQ3Mzk5fQ.pj4bb56PqogZ54bn3jw-jck3KFlpbRXt1cLxs6LGUU4`
 
 ---
 
@@ -46,7 +46,7 @@ for the §42 finance testing pass; the tokens previously logged here had expired
 Check items off as each one gets exercised against a running server and logged in a numbered
 section below. Grouped by resolver domain (`src/graphQL/resolvers/<domain>/`).
 
-### Queries (20)
+### Queries (27)
 
 **business**
 - [x] getMyBusinesses
@@ -67,6 +67,7 @@ section below. Grouped by resolver domain (`src/graphQL/resolvers/<domain>/`).
 **job**
 - [x] getAvailableEmployees
 - [x] getMyBookings
+- [x] getMyUpcomingJobs
 - [x] getBusinessJobs
 - [x] getMyJobs
 - [x] getJob
@@ -84,12 +85,13 @@ section below. Grouped by resolver domain (`src/graphQL/resolvers/<domain>/`).
 
 **user**
 - [x] getMe
+- [x] getSession
 - [x] getUserById
 
 **root**
 - [x] healthCheck
 
-### Mutations (37)
+### Mutations (40)
 
 **owner**
 - [x] registerOwner
@@ -2731,4 +2733,298 @@ afterward showed `unpaidEarningsTotal: 0`, not a negative or double-deducted bal
 - Every one of the 8 new operations has now been exercised with a happy path, its documented negative
   cases, and (for the two mutations where the codebase explicitly claims race-safety) a real
   concurrent-request test — not just a single-threaded call.
+
+---
+
+## 43. Get Session — Sign-In Bootstrap
+
+`getSession` was written, then sat unwired (not exported from `userResolvers.ts`, not declared in
+`typeDefs.ts`) for a while before this pass. It's now wired, and this is its first exercise against a
+running server. It's also the first thing to read `BusinessMember.business`, a brand-new type-level
+field resolver added in the same pass — so this section covers both at once.
+
+The entire point of this resolver is reporting "staff?" and "customer?" as two independent facts
+instead of one role string, specifically because a user can be both, either, or neither. The test
+matrix below was chosen to hit all three reachable combinations with the existing accounts (see
+Notes for the one combination — *neither* — that existing accounts can't reach).
+
+### Input
+
+```graphql
+query {
+  getSession {
+    user { id email firstName lastName }
+    memberships { id role isActive joinedAt business { id name isActive } }
+    customerProfile { id address city }
+  }
+}
+```
+
+### Response
+
+**Owner** — staff only, no customer profile:
+```json
+{"data":{"getSession":{"user":{"id":"0bfaff01-7e2f-4b60-811b-04b9909285ae","email":"owner.test1@petsitterpro.dev","firstName":"Dylan","lastName":"Owner"},"memberships":[{"id":"f6f86288-8cb4-4f08-a79d-7e1bdc2d9f6d","role":"OWNER","isActive":true,"joinedAt":"2026-07-19T16:04:46.813Z","business":{"id":"eeed145f-246b-4c14-8b1a-246850d1ea8a","name":"Puget Sound Pet Care","isActive":true}}],"customerProfile":null}}}
+```
+
+**Manager** — staff only, no customer profile:
+```json
+{"data":{"getSession":{"user":{"id":"20be60f0-7d99-470c-ad24-e8ddd1314241","email":"manager.test1@petsitterpro.dev","firstName":"Morgan","lastName":"Manager"},"memberships":[{"id":"68081d4b-8bf9-4099-b6ec-2806cf8b1c5a","role":"MANAGER","isActive":true,"joinedAt":"2026-07-19T16:33:35.052Z","business":{"id":"eeed145f-246b-4c14-8b1a-246850d1ea8a","name":"Puget Sound Pet Care","isActive":true}}],"customerProfile":null}}}
+```
+
+**Employee** — staff only, no customer profile:
+```json
+{"data":{"getSession":{"user":{"id":"ca7aa688-4426-451c-8ed7-8b17babe0363","email":"employee.newemail@petsitterpro.dev","firstName":"Erin","lastName":"Employee"},"memberships":[{"id":"cc28c51f-3c59-4c44-9cea-cf881b468533","role":"EMPLOYEE","isActive":true,"joinedAt":"2026-07-19T16:33:34.760Z","business":{"id":"eeed145f-246b-4c14-8b1a-246850d1ea8a","name":"Puget Sound Pet Care","isActive":true}}],"customerProfile":null}}}
+```
+
+**Customer** (`customer.test1`, the dual-role account) — **both facts true at once, neither
+clobbering the other**:
+```json
+{"data":{"getSession":{"user":{"id":"7065a3f9-aec6-4d66-a9f5-e05cf18392ac","email":"customer.test1@petsitterpro.dev","firstName":"Casey","lastName":"Customer"},"memberships":[{"id":"8f024572-3ff9-4651-b4b8-d2979ab2f40a","role":"MANAGER","isActive":true,"joinedAt":"2026-07-19T17:57:47.533Z","business":{"id":"eeed145f-246b-4c14-8b1a-246850d1ea8a","name":"Puget Sound Pet Care","isActive":true}}],"customerProfile":{"id":"36ac885f-1dee-441a-ac52-077d2e4cd910","address":null,"city":null}}}}
+```
+This is the case the whole `Session` type exists for: the old single-`role` design (`membership?.role
+?? 'CUSTOMER'`) would have reported this user as a plain `MANAGER` and silently dropped that they're
+also a customer. Here both survive.
+
+**Outsider** — turns out to be a pure customer with zero business affiliation, not a "neither" case
+(see Notes — it was registered via `registerCustomer`, which is why it has a profile):
+```json
+{"data":{"getSession":{"user":{"id":"471565e6-4fb7-464a-9845-6cfc9715ffe9","email":"outsider.test1@petsitterpro.dev","firstName":"Olive","lastName":"Outsider"},"memberships":[],"customerProfile":{"id":"ef164348-31e2-4f41-b125-d985bc9dfecf","address":null,"city":null}}}}
+```
+
+### `BusinessMember.business` field resolver — sensitivity gate carries through
+
+Re-ran with `memberships { role business { id defaultSitterPayPercent avgRating serviceFeeAmount } }`
+to confirm the brand-new `business` field doesn't bypass the existing SENSITIVE gate on
+`defaultSitterPayPercent` (§42.2) now that `Business` is reachable through a second path:
+
+```json
+// Owner — sees the real value
+{"data":{"getSession":{"memberships":[{"role":"OWNER","business":{"id":"eeed145f-246b-4c14-8b1a-246850d1ea8a","defaultSitterPayPercent":50,"avgRating":5,"serviceFeeAmount":null}}]}}}
+// Employee — same field, correctly null (not OWNER/MANAGER)
+{"data":{"getSession":{"memberships":[{"role":"EMPLOYEE","business":{"id":"eeed145f-246b-4c14-8b1a-246850d1ea8a","defaultSitterPayPercent":null}}]}}}
+```
+`avgRating: 5` also confirms the Decimal→Number conversion still fires when `Business` is reached via
+`BusinessMember.business` rather than `getMyBusinesses`/`updateBusiness`/`getNearbyBusinesses` — this
+is a genuinely new code path to the same type, not just a new query wrapping old ones.
+
+### Key IDs
+
+| Field | Value |
+|-------|-------|
+| `customer.test1`'s `CustomerProfile.id` | `36ac885f-1dee-441a-ac52-077d2e4cd910` (newly observed — not previously logged in this file) |
+| Outsider's `CustomerProfile.id` | `ef164348-31e2-4f41-b125-d985bc9dfecf` (newly observed) |
+
+### Negative cases tested
+
+| Scenario | Result |
+|----------|--------|
+| No `Authorization` header | `UNAUTHENTICATED` — "You must be logged in." |
+| `Authorization: Bearer not-a-real-token` (garbage, not just expired) | `UNAUTHENTICATED` — same message. Confirms `verifyToken()`'s "never throws, just returns null" contract holds for garbage input, not only for a well-formed-but-expired token, and that `getSession`'s own `context.user == null` check catches it identically to the no-token case. |
+
+### Notes
+- **One combination — no active membership *and* no `CustomerProfile` — was not reachable this
+  round.** That's the "removed owner" case both manifests describe: `registerOwner` creates no
+  profile, and `removeMember` only soft-deletes, so a removed owner ends up with neither. Testing it
+  needs a fresh `BusinessMember` that can then be removed (unlike an OWNER's, which `removeMember`
+  can never touch), which means going through `inviteEmployee` → `acceptInvitation`. The invitation
+  token isn't emailed in this environment (no SMTP configured) — it's only `console.log`'d by
+  `sendInvitationEmail`, straight to the server process's own stdout. That process was started
+  directly by the developer in a terminal this session has no read access to, so there was no way to
+  retrieve a token to complete the accept step. §37's already-removed member ("Zack Throwaway") can't
+  substitute either — their invitation token was single-use and already consumed, and was never
+  written to this log (correctly, since it's a bearer secret). Closing this gap just needs someone
+  with console access to run `inviteEmployee`, paste the logged token back, and let `acceptInvitation`
+  → `removeMember` → `getSession` run from there.
+- The `memberships` filter (`isActive: true`) was exercised the same way §9's `getMyBusinesses` test
+  was — none of the five accounts above currently has an inactive membership, so this confirms the
+  active ones all come through correctly but doesn't independently prove the exclusion. Not re-proven
+  here since it's the identical `where` clause already covered there, and the gap above is the same
+  gap that would let it be proven properly.
+- Every account's `memberships[].business` resolved to real, correct data (not `null`, not an error),
+  confirming the field resolver's `parent.business ?? <query>` short-circuit is at minimum
+  functionally correct. Whether it actually *skipped* the fallback query (rather than firing it and
+  getting the same answer) isn't independently confirmed here — that would need query-count
+  visibility (e.g., Prisma query logging) into the same terminal session mentioned above.
+
+---
+
+## 44. Get My Upcoming Jobs — Customer's Flattened Job List
+
+New query: the customer-facing equivalent of `getMyJobs`/`getBusinessJobs`, added specifically to
+answer "what's coming up" for a Home screen. Same `statuses`/`from`/`to` filter shape as its two
+siblings, but scoped by `Job.customerId` and returning `[Job!]!` flattened across every booking
+instead of nested under one — a 5-session package's jobs come back as 5 peers, not buried under a
+`Booking`. First exercise was blocked by a stale dev server (schema introspection showed 26 Query
+fields when 27 were declared); resolved by restarting.
+
+### Input
+
+```graphql
+query { getMyUpcomingJobs(statuses: [String!], from: String, to: String) { id status scheduledStartTime } }
+```
+
+### Cross-check against `getMyBookings` (consistency, not just "no error")
+
+Ran `getMyBookings { jobs { id status scheduledStartTime } }` first, then `getMyUpcomingJobs` with no
+args, as `customer.test1`. Flattening the 9 bookings' nested jobs from the first call produced **the
+exact same 13 job IDs** as the second call's flat list — same set, just correctly re-ordered by
+`scheduledStartTime` ascending instead of grouped by booking (`getMyBookings`' own order is
+`createdAt` desc, so its nested dates appear jumbled: `08-03, 08-02, 08-01, 07-28, ...`). This is
+stronger evidence than a shape check — it confirms the new resolver's `where: { customerId }`
+produces the identical dataset the already-tested nested path does, not just *a* plausible-looking
+one.
+
+### Response
+
+**No args — full history, 13 jobs, correctly sorted ascending (only the sort order differs from the
+cross-check above):**
+```json
+{"data":{"getMyUpcomingJobs":[{"id":"43fcc471-e464-42ef-9646-ccad64104d1b","status":"COMPLETED","scheduledStartTime":"2026-07-20T02:00:00.000Z"},{"id":"0cca260f-0f92-4e94-aec1-72435aac7cba","status":"COMPLETED","scheduledStartTime":"2026-07-21T02:00:00.000Z"},{"id":"94525a0d-7639-4fa6-991d-ad98423ce1c6","status":"CANCELLED","scheduledStartTime":"2026-07-22T02:00:00.000Z"},{"id":"47117252-c172-4f2b-bc08-c73b5cc74a1f","status":"DECLINED","scheduledStartTime":"2026-07-22T15:00:00.000Z"},{"id":"2353ce52-98e4-4c7b-b241-9fed51db5fcc","status":"CANCELLED","scheduledStartTime":"2026-07-23T02:00:00.000Z"},{"id":"27badf2b-5500-428c-be0d-b657b0fb7cae","status":"CANCELLED","scheduledStartTime":"2026-07-24T02:00:00.000Z"},{"id":"f2e4b152-5e9d-4a5d-87f5-6c7a1c1b7ce8","status":"CANCELLED","scheduledStartTime":"2026-07-25T12:00:00.000Z"},{"id":"d5a148fc-bd21-4ba1-81f7-8ece33fc50e0","status":"CANCELLED","scheduledStartTime":"2026-07-26T12:00:00.000Z"},{"id":"d171c52a-9faf-464e-a565-d4d0696c0038","status":"CANCELLED","scheduledStartTime":"2026-07-27T12:00:00.000Z"},{"id":"15300171-2cc5-42f5-94c9-3b8fb880105a","status":"CANCELLED","scheduledStartTime":"2026-07-28T12:00:00.000Z"},{"id":"5fbb35bc-2f21-4e46-864a-5e72358e312c","status":"COMPLETED","scheduledStartTime":"2026-08-01T10:00:00.000Z"},{"id":"a5e42fa2-5892-4bce-808c-26cc9f0ef27f","status":"COMPLETED","scheduledStartTime":"2026-08-02T10:00:00.000Z"},{"id":"f6c4074d-4266-4e03-a4e0-1c3952f6b0d1","status":"COMPLETED","scheduledStartTime":"2026-08-03T10:00:00.000Z"}]}}
+```
+
+**`from: "2026-07-21T00:00:00.000Z"` (today, per the server's own clock) — "current date and
+forward," the literal feature request:** returned 12 of the 13 jobs, excluding exactly the one dated
+`2026-07-20T02:00:00.000Z` (`43fcc471`) — the only job before the cutoff. Everything from
+`0cca260f` (today, `07-21T02:00`) onward came through.
+
+**`to: "2026-07-22T23:59:59.000Z"` — the other bound, for symmetry with `getMyJobs`/`getBusinessJobs`:**
+returned exactly the 4 earliest jobs (`43fcc471` 07-20, `0cca260f` 07-21, `94525a0d` 07-22T02:00,
+`47117252` 07-22T15:00) — confirms same-day jobs at different times both correctly fall inside the
+bound, not just whole-day granularity.
+
+**`statuses: ["CANCELLED"]`:** returned exactly the 7 `CANCELLED` jobs in the dataset, none of the
+5 `COMPLETED` or 1 `DECLINED` — filter composes correctly alongside the date bounds (not tested
+together in the same call here, but each filter clause is independent in the resolver, same as its
+siblings).
+
+### Key IDs
+
+| Field | Value |
+|-------|-------|
+| Customer | `customer.test1` — `7065a3f9-aec6-4d66-a9f5-e05cf18392ac` |
+| Full job set (13) | `43fcc471…`, `0cca260f…`, `94525a0d…`, `47117252…`, `2353ce52…`, `27badf2b…`, `f2e4b152…`, `d5a148fc…`, `d171c52a…`, `15300171…`, `5fbb35bc…`, `a5e42fa2…`, `f6c4074d…` (full UUIDs in the responses above) |
+
+### Negative cases tested
+
+| Scenario | Result |
+|----------|--------|
+| Caller with no `CustomerProfile` (`owner.test1`) | `FORBIDDEN` — "Only customers have jobs." |
+| No `Authorization` header | `UNAUTHENTICATED` — "You must be logged in." |
+| `from: "not-a-date"` | `BAD_USER_INPUT` — "Invalid from date" (Zod's `z.coerce.date()` message, same as `getMyJobs`/`getBusinessJobs` use for the same bad input) |
+
+### Notes
+- The first attempt at testing this (previous session) failed entirely: GraphQL validation rejected
+  the field with "Cannot query field \"getMyUpcomingJobs\" on type \"Query\"", and introspection
+  confirmed the running server still had the pre-change 26-field schema. The dev server hadn't
+  reloaded despite the file changes being on disk and statically verified as correctly wired — most
+  likely explained by `tsx watch`'s file-watcher not reliably crossing the WSL↔Windows filesystem
+  boundary (the server runs from a WSL shell against `/mnt/c/...`; edits were written through the
+  Windows-side path). A manual restart resolved it; introspection afterward showed 27 fields with
+  `getMyUpcomingJobs` present. Worth remembering for any future backend change tested from this
+  session: a stale/unresponsive schema after an edit doesn't necessarily mean the code is wrong.
+- Did not test `statuses` combined with `from`/`to` in the same call, or pagination/`limit` (this
+  query has none, same as `getMyJobs`/`getBusinessJobs` — unbounded by design, matching its
+  siblings). Both are low-risk gaps: the `where` clause builds each condition independently and
+  identically to the two already-proven siblings, so compounding them is very unlikely to interact
+  in a surprising way.
+
+---
+
+## 45. Job-Transition Race Guard — `acceptJob` / `declineJob` / `assignSitter` / `clockIn` / `cancelJob`
+
+A code review of the job state machine found that these five mutations (unlike `clockOut`/
+`completeJob`/`addTip`) checked `Job.status` in JS and then wrote unconditionally — no transaction,
+no status condition on the `update()` itself. Two callers could both pass the same pre-check and the
+second write would win silently, with the loser's response describing a status that was never
+actually persisted. Fixed by adding `job/jobTransition.ts` (`runGuardedTransition`), which repeats
+the just-checked status (or, for `cancelJob`, the allowed-status set) as a condition on the `update()`
+`where` clause and converts the resulting Prisma `P2025` ("no row matched") into a `CONFLICT`
+GraphQLError. See `AI_MANIFEST.md` §10's state-machine note for the full rationale. This section
+tests that fix: first that ordinary single-caller behavior is unchanged, then that genuine concurrent
+races resolve correctly.
+
+### Normal-flow re-verification (sequential, no race)
+
+Re-ran each mutation's happy path against fresh bookings to confirm the added `where` guard doesn't
+reject a legitimate single-caller transition:
+
+| Mutation | Job | Result |
+|----------|-----|--------|
+| `acceptJob` | `3a63adaf-447e-4eca-9a91-d60a5f0baa31` | `ACCEPTED` |
+| `assignSitter` (same job, continuing the chain) | `3a63adaf-...` | `ASSIGNED`, `assigneeId: cc28c51f-...` |
+| `clockIn` (same job) | `3a63adaf-...` | `IN_PROGRESS` |
+| `declineJob` | `f677fb30-0601-4194-a136-fe6a334a1be2` | `DECLINED` |
+| `cancelJob` (customer, from `PENDING`) | `e52ae8df-fb47-4a79-b945-5038cf61cfe5` | `CANCELLED` |
+| `cancelJob` (owner, from `ACCEPTED`) | `522a6d4f-d6cd-4e77-9ba3-685d6ce5fdb2` | `CANCELLED` |
+| `clockIn` on a job with no assignee yet | `08dafcd8-7cd5-40ed-8be3-f78c5a9bb471` | `FORBIDDEN` — "This job has no assigned sitter." (unchanged pre-check, not the new guard) |
+
+All seven matched pre-fix behavior exactly.
+
+### Concurrency tests — genuine mutual-exclusion races
+
+Following the same methodology as 42.4/42.6 (two backgrounded shell processes hitting the same job at
+the same instant, no artificial delay — same-process `Promise.all` was tried first and did not
+reliably force real overlap; see Notes). Each race pairs two operations that cannot both legitimately
+win.
+
+| Race | Job | Winner | Loser | What caught the loser |
+|------|-----|--------|-------|------------------------|
+| A: `acceptJob` vs `declineJob`, same `PENDING` job | `a416922b-f31d-4de0-a63b-2b0a16ee775a` | accept → `ACCEPTED` | decline → `BAD_USER_INPUT` "This job cannot be declined from its current status (ACCEPTED)." | ordinary pre-check (accept's write had already landed) |
+| B: `assignSitter`(employee) vs `assignSitter`(manager), same `ACCEPTED` job | `e586cca2-249c-482c-b1c4-75de83531a10` | employee → `ASSIGNED`, `assigneeId: cc28c51f-...` | manager → error | **the new guard** — `CONFLICT` "This job is no longer awaiting a sitter — it may have been cancelled or assigned by someone else." |
+| C: `cancelJob`(customer) vs `cancelJob`(owner), same `ACCEPTED` job | `eaf3f039-6b3f-4509-9530-af784e372467` | customer → `CANCELLED` | owner → error | **the new guard** — `CONFLICT` "This job changed status before it could be cancelled." |
+| D: `clockIn` vs `clockIn`, same sitter, same `ASSIGNED` job, called twice | `ac6e854e-27c4-4c38-83ad-5812ec00cbf8` | first → `IN_PROGRESS`, `actualStartTime: ...22:26:01.327Z` | second → `BAD_USER_INPUT` "Cannot clock in from this job's current status (IN_PROGRESS)." | ordinary pre-check (first write had already landed) |
+
+All four: exactly one winner, final DB state matched the winner exactly, and the loser got a clean
+error rather than a silent overwrite or a corrupted row. B and C specifically exercised the new guard
+end-to-end (the loser's pre-check read the still-valid pre-race status, so only the guarded `where`
+on the `update()` itself caught it). A and D had the ordinary pre-check win the timing race instead —
+a legitimate possible outcome (means the winner's entire round trip, including its DB write,
+completed before the loser's initial read went out), not a gap: B and C prove the guard is there and
+correct for whenever the pre-check *doesn't* win that timing race.
+
+### Corrected finding: `assignSitter` vs `cancelJob` is not actually a race bug
+
+The original review flagged this pairing as the worst case — a customer's `cancelJob` racing a
+manager's `assignSitter` on the same `ACCEPTED` job, worried the cancellation could be silently lost.
+Tested directly (job `829aeb9e-5b1e-4be6-858f-e679f11170ab`): `assignSitter` ran first
+(`ASSIGNED`, `assigneeId: cc28c51f-...`), then the customer's `cancelJob` **also succeeded**
+(`CANCELLED`) — `assignedAt: ...22:14:37.260Z` and `cancelledAt: ...22:14:37.261Z`, 1ms apart. This
+is correct, not corruption: `CANCELLABLE_BY_CUSTOMER` deliberately includes `ASSIGNED` (`cancelJob.ts`
+— a customer may cancel `PENDING`/`ACCEPTED`/`ASSIGNED`), so a cancellation landing just after an
+assignment is a legitimate sequential operation, not two callers fighting over the same outcome.
+`assigneeId` was correctly retained on the cancelled row per `AI_MANIFEST.md`'s note that who was on
+the job still matters for history. The failure mode the guard actually prevents is the reverse
+ordering — `cancelJob` landing first would leave the job `CANCELLED`, and `assignSitter`'s guard
+(`where: { status: 'ACCEPTED' }`) would then correctly refuse to match a `CANCELLED` row, returning
+`CONFLICT` instead of dispatching a sitter to a cancelled booking. Race B above is the cleaner,
+unambiguous test of that same guard mechanism.
+
+### Key IDs
+
+| Role | Value |
+|------|-------|
+| Business | Puget Sound Pet Care — `eeed145f-246b-4c14-8b1a-246850d1ea8a` |
+| Offerings used | Cat Sitting Visits `fddafd5f-9e9a-49a4-aae3-82a0e6ee9820` ($22, normal-flow jobs); Dog Walking `ee6d47cc-d0d7-4358-bb56-1a42fccc0cae` ($25, race jobs A–D) |
+| Pet | Biscuit — `edf9db53-9c4a-4e98-8bcb-7361ca856856` |
+| Employee (assignee in most tests) | `cc28c51f-3c59-4c44-9cea-cf881b468533` |
+| Manager (second assignee, Race B only) | `68081d4b-8bf9-4099-b6ec-2806cf8b1c5a` |
+
+### Notes
+
+- 11 throwaway `Job`/`Booking` rows now exist in the dev DB from this pass (`job1`–`job7` above, plus
+  races A–D) — left as-is, consistent with how every prior section in this document accumulates test
+  data rather than cleaning up after itself.
+- The first attempt at the concurrency tests used Node's `fetch` with `Promise.all` in a single
+  script rather than separate OS processes. It produced a real result for `acceptJob` vs
+  `declineJob` but the two requests didn't overlap enough to exercise the guard specifically (same
+  outcome as Race A above — pre-check won). Switched to backgrounded `curl` processes (separate OS
+  processes, matching 42.4/42.6 exactly) for all four races logged here, which reliably produced
+  tighter overlap. Worth remembering for any future concurrency test from this codebase: same-process
+  `fetch`/`Promise.all` is not a reliable way to force two requests to overlap at the DB level, even
+  though it looks like it should.
+- Did not test a three-way race (e.g. `assignSitter` + `cancelJob` + a second `assignSitter` all on
+  one job at once) — the pairwise guarantees proven here (exactly one write survives, the guard
+  matches only a still-valid prior state) compose the same way regardless of how many losers there
+  are, since each guarded `update()` is independently atomic against the row, not against each other.
 

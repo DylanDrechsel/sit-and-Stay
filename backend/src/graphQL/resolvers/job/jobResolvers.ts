@@ -11,6 +11,7 @@ import { postJobUpdate } from './mutations/postJobUpdate.js';
 import { submitReportCard } from './mutations/submitReportCard.js';
 import { getAvailableEmployees } from './queries/getAvailableEmployees.js';
 import { getMyBookings } from './queries/getMyBookings.js';
+import { getMyUpcomingJobs } from './queries/getMyUpcomingJobs.js';
 import { getBusinessJobs } from './queries/getBusinessJobs.js';
 import { getMyJobs } from './queries/getMyJobs.js';
 import { getJob } from './queries/getJob.js';
@@ -22,6 +23,7 @@ export const jobResolvers = {
     Query: {
         getAvailableEmployees,
         getMyBookings,
+        getMyUpcomingJobs,
         getBusinessJobs,
         getMyJobs,
         getJob,

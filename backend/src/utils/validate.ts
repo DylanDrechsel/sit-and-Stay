@@ -570,6 +570,15 @@ export const getMyJobsSchema = z.object({
 });
 
 /**
+ * Validates input for the customer's own flattened job list (getMyUpcomingJobs).
+ * Same shape as getMyJobsSchema — the two are unrelated resolvers (sitter vs.
+ * customer scope) that just happen to need identical filters today.
+ */
+export const getMyUpcomingJobsSchema = z.object({
+    ...jobListFilters,
+});
+
+/**
  * Validates input for paging a job's update feed (getJobUpdates).
  * `before` is a createdAt cursor — pass the oldest createdAt you already have
  * to fetch the next (older) page.

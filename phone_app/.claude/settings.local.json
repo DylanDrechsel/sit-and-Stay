@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"C:\\\\Users\\\\Drech\\\\Documents\\\\computer_science\\\\projects\\\\pet_sitter\" -maxdepth 2 -type d | grep -v node_modules | grep -v \".git\")"
+    ]
+  }
+}

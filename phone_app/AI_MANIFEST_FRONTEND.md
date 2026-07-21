@@ -15,21 +15,42 @@
 
 ## 1. Current Status — Read This First
 
-**The app is a fresh Expo template plus installed dependencies. Almost nothing is built yet.**
+**Email/password auth works end to end: Welcome → Login → Home, with the Home screen rendering
+`getSession`.** Beyond auth, an OWNER/MANAGER sees a first read-only dashboard on Home — the "2A"
+Today view: today's date, the business name, and three headline counts (Jobs today / Unassigned /
+Cancelled today) over today's job list, all from `getBusinessJobs` (see the row below). No tabs,
+bookings, pets, or dedicated business screens yet.
 
 What exists today:
 
 | Path | State |
 |------|-------|
-| `App.tsx` | Untouched Expo boilerplate ("Open up App.tsx to start working on your app!") |
+| `App.tsx` | Provider stack (`ApolloProvider` → `AuthProvider` → `SafeAreaProvider`), loads the six Sora/Manrope weights, then renders `RootNavigator`. |
 | `index.ts` | `registerRootComponent(App)` — standard, don't edit |
 | `app.json` | Expo config; `expo-font` registered under `plugins` |
 | `tsconfig.json` | Extends `expo/tsconfig.base`, `strict: true` |
-| `assets/` | Default icons/splash from the template |
-| `src/` | **Does not exist yet** |
+| `.env` | **Gitignored** (repo-root `.gitignore`, bare `.env` entry). No `.env.example` is checked in — see §4. |
+| `src/lib/env.ts` | Reads + validates `EXPO_PUBLIC_API_URL`, throwing a useful message if unset. |
+| `src/lib/datetime.ts` | `formatToday()` / `formatTime()` — device-local date/time formatters shared by the home dashboard and job rows. |
+| `src/lib/tokenStorage.ts` | JWT get/set/clear. Branches on `Platform.OS` — SecureStore native, `localStorage` on web (§6). |
+| `src/lib/apolloClient.ts` | Apollo Client 4: auth link (reads token fresh per request) + error link (UNAUTHENTICATED → sign out). |
+| `src/context/AuthContext.tsx` | `token` / `isRestoring` / `signIn` / `signOut`. Restores the token on cold start and clears the Apollo store on sign-out. |
+| `src/navigation/RootNavigator.tsx` | Swaps auth stack ↔ app stack on `token`. Param lists exported. |
+| `src/graphql/auth.ts`, `src/graphql/session.ts`, `src/graphql/job.ts` | `LOGIN` mutation, `GET_SESSION` query, `GET_BUSINESS_JOBS` query — all `TypedDocumentNode`. |
+| `src/types/session.ts`, `src/types/job.ts` | Hand-written mirrors of the schema types (`session.ts` = User/Business/membership/profile; `job.ts` = the `BusinessJob` slice `GET_BUSINESS_JOBS` selects). |
+| `src/validation/auth.ts` | `loginSchema`, mirroring the backend field-for-field. |
+| `src/screens/auth/WelcomeScreen.tsx` | Landing screen. Apple/Google buttons are **deliberately inert `View`s** — the API has no OAuth mutation, and `login` rejects null-`passwordHash` accounts. "Continue with email" now navigates to Login. |
+| `src/screens/auth/LoginScreen.tsx` | Email/password form (React Hook Form + Zod). |
+| `src/screens/HomeScreen.tsx` | Renders `getSession` and composes the home layout. For an OWNER/MANAGER it renders `<BusinessTodayDashboard>` per business run; EMPLOYEE-only staff get a compact "Also on staff at" list; customers get a compact profile line; everyone gets pull-to-refresh + sign-out. Screen-level only — the dashboard, stat boxes, and job rows are their own components now. |
+| `src/components/BusinessTodayDashboard.tsx` | The "2A" Today dashboard for one business: date + business name header, three `StatBox` counts (Jobs today / Unassigned / Cancelled today), and today's job list. Owns the `getBusinessJobs` `useQuery` (device local-day `from`/`to`) and derives the three counts client-side. One instance per business — its own query, so it isn't a hook called in a loop. |
+| `src/components/StatBox.tsx` | Presentational headline count — big number over a muted label; `tone` (`mint`/`plain`/`accent`) colours the number. |
+| `src/components/JobListItem.tsx` | Presentational single job row (number + service, status pill, time window, customer, sitter). Takes a `BusinessJob`, no fetching — reusable by any future job list. |
+| `src/theme/`, `src/components/PawMark.tsx` | Palette, font constants, logo mark. |
 
-Do not assume any screen, provider, navigator, or helper described below exists. Check the
-filesystem first.
+Still **PLANNED**: `src/components/` beyond the logo mark, and every non-auth screen.
+
+> **Sequencing note:** the backend was finished and verified first (all 67 operations tested); the
+> app is now being built against it. Auth is the first slice.
 
 ---
 
@@ -42,7 +63,8 @@ filesystem first.
 | UI Library | React 19.2.3 |
 | Language | TypeScript 6 (`strict: true`) |
 | API Client | Apollo Client 4 (`@apollo/client ^4.2.7`) + `graphql 16` |
-| Navigation | React Navigation 7 (`native-stack` + `bottom-tabs`) |
+| Navigation | React Navigation 7 (`native-stack` + `bottom-tabs`), on `react-native-screens` |
+| Safe areas | `react-native-safe-area-context` — `SafeAreaProvider` wraps the tree in `App.tsx` |
 | Forms | React Hook Form 7 + `@hookform/resolvers` |
 | Validation | Zod 4 (mirrors the backend's `utils/validate.ts`) |
 | Secure Storage | `expo-secure-store` (JWT) — **native only, see §6** |
@@ -70,40 +92,97 @@ Current (real):
 
 ```
 phone_app/
-├── App.tsx                      # Root component — still boilerplate
+├── App.tsx                      # provider stack + useFonts + RootNavigator
 ├── index.ts                     # registerRootComponent, do not edit
 ├── app.json                     # Expo config (plugins: expo-font)
 ├── tsconfig.json                # extends expo/tsconfig.base, strict
-└── assets/                      # icons + splash
+├── AGENTS.md                    # read the SDK 57 docs before writing Expo code
+├── .env                         # gitignored — your local config; no .env.example checked in (§4)
+└── src/
+    ├── components/
+    │   ├── PawMark.tsx
+    │   ├── BusinessTodayDashboard.tsx  # the "2A" Today dashboard (owns getBusinessJobs)
+    │   ├── StatBox.tsx          # one headline count
+    │   └── JobListItem.tsx      # one job row (presentational)
+    ├── context/
+    │   └── AuthContext.tsx      # token state, signIn/signOut, cold-start restore
+    ├── graphql/
+    │   ├── auth.ts              # LOGIN
+    │   ├── session.ts           # GET_SESSION
+    │   └── job.ts               # GET_BUSINESS_JOBS
+    ├── lib/
+    │   ├── apolloClient.ts      # links: error -> auth -> http
+    │   ├── datetime.ts          # formatToday / formatTime (device-local)
+    │   ├── env.ts               # validated EXPO_PUBLIC_* access
+    │   └── tokenStorage.ts      # SecureStore, localStorage on web
+    ├── navigation/
+    │   └── RootNavigator.tsx    # auth stack <-> app stack
+    ├── screens/
+    │   ├── HomeScreen.tsx
+    │   └── auth/
+    │       ├── LoginScreen.tsx
+    │       └── WelcomeScreen.tsx
+    ├── theme/
+    │   ├── colors.ts
+    │   └── typography.ts
+    ├── types/
+    │   ├── session.ts
+    │   └── job.ts
+    └── validation/
+        └── auth.ts
 ```
 
-**PLANNED** layout under `src/` — create these as you need them, not upfront:
+### ⚠️ Apollo Client 4 import paths differ from v3
 
-```
-src/
-├── components/                  # Shared presentational components
-├── context/                     # AuthContext, SessionContext (§8)
-├── graphql/                     # gql documents, grouped by domain
-├── lib/                         # apolloClient.ts, secureStore.ts
-├── navigation/                  # RootNavigator, per-role stacks, param lists
-├── screens/                     # One folder per feature area
-├── theme/                       # colors.ts, typography.ts
-├── types/                       # TS types mirroring GraphQL schema types
-└── validation/                  # Zod schemas mirroring backend validate.ts
-```
+Most Apollo examples online are v3 and **will not resolve** here. Verified against the installed
+`@apollo/client@4.2.7`:
+
+| Symbol | v4 import path |
+|--------|----------------|
+| `ApolloClient`, `ApolloLink`, `HttpLink`, `InMemoryCache`, `gql`, `TypedDocumentNode`, `NetworkStatus` | `@apollo/client` |
+| `ApolloProvider`, `useQuery`, `useMutation`, `useLazyQuery`, `useSuspenseQuery` | `@apollo/client/react` — **not** the root |
+| `SetContextLink` | `@apollo/client/link/context` |
+| `ErrorLink` | `@apollo/client/link/error` |
+| `CombinedGraphQLErrors` | `@apollo/client` (also `@apollo/client/errors`) |
+
+Two further v4 changes that bite:
+
+- **`SetContextLink` takes `(prevContext, operation)`** — v3's `setContext` took them the other way
+  round. Both still exist; `setContext`/`onError` are deprecated aliases.
+- **Errors are typed classes, not one `ApolloError`.** Check with `CombinedGraphQLErrors.is(error)`
+  before reading `error.errors[].extensions.code`.
+- `rxjs` is a required peer dependency (present transitively at 7.8.2). Don't remove it.
+
+The directory conventions above hold as the app grows: one folder per concern, `screens/` gets a
+subfolder per feature area, `graphql/` is grouped by domain.
 
 ---
 
 ## 4. Environment Variables
 
-`phone_app/.env`:
+**`.env` is gitignored** (by the repo-root `.gitignore`, which has a bare `.env` entry).
+**There is no `.env.example` checked in** — on a fresh clone, create `.env` yourself with the
+variable below, or the app throws a descriptive error from `src/lib/env.ts` on first load instead
+of failing with an opaque `undefined` URL. (A tracked `.env.example` would remove this manual step
+— worth adding.)
 
 ```
 EXPO_PUBLIC_API_URL=http://localhost:4000/graphql
 ```
 
 **`EXPO_PUBLIC_*` variables are inlined into the JS bundle at build time.** They are readable by
-anyone with the app binary. Never put a secret, API key, or credential in one.
+anyone with the app binary — they exist for per-environment *config*, not secrecy. Never put a
+secret, API key, or credential in one. That's fine for everything this app needs: the API URL is
+public by definition, and the only credential it holds is the user's JWT, issued at runtime by
+`login` and kept in the device keychain (`src/lib/tokenStorage.ts`) — never in a build-time variable.
+
+Two consequences worth knowing:
+
+- **Metro only inlines statically-analysable references.** `process.env.EXPO_PUBLIC_API_URL` written
+  out literally works; a dynamic `process.env[name]` compiles and then resolves to `undefined` at
+  runtime. `src/lib/env.ts` is the single place that reads it.
+- **Env vars are read when the bundle is built**, so a Metro server that's already running won't pick
+  up an edited `.env`. Restart with `npx expo start -c`.
 
 Host resolution differs per platform — this is the single most common "it works on web but not my
 phone" cause:
@@ -141,8 +220,8 @@ The backend must be running separately (`npm run dev` from `backend/`, plus
 - **CORS on web only.** The browser enforces CORS; native `fetch` does not. The backend whitelist
   in `backend/src/server.ts` must contain the Expo web origin (`http://localhost:8081`) or every
   request fails as a bare `TypeError: Failed to fetch` with no status code — which looks nothing
-  like an auth error. **As of this writing `localhost:8081` is NOT in that whitelist.** Add it
-  before using the web preview against a live API.
+  like an auth error. `localhost:8081` **is** in that whitelist as of `server.ts:33`. If you ever
+  serve Metro on a different port, add that origin too.
 - After adding a package, restart with `-c`. Most "module not found" weirdness is a stale cache.
 
 ---
@@ -221,28 +300,68 @@ Consequences for the app:
 3. Authorization is always re-checked server-side. Client-side role logic is for *presentation
    only*; never treat a hidden button as a security boundary.
 
-### ⚠️ Known gap: `getMyBusinesses` does not return your role
+### ✅ Resolved: use `getSession` to build the session context
 
-`getMyBusinesses` is declared `[Business!]!` and its resolver does
-`memberships.map((m) => m.business)` — it reads `BusinessMember` and then **discards the role**.
-So the app can learn *which* businesses you belong to but not whether you are an OWNER, MANAGER, or
-EMPLOYEE in each — precisely the fact the whole role-based UI branches on.
+**This is the query the session context should be built on.** One call after login returns
+everything needed to decide what to render:
 
-Fix before building the session context: return `[BusinessMember!]!` (which already carries `role`,
-`isActive`, `joinedAt`) and add a `business: Business!` field to the `BusinessMember` GraphQL type,
-lazily resolved so member-queries already scoped to one business don't pay for the join.
+```graphql
+query GetSession {
+  getSession {
+    user { id firstName lastName email avatarUrl }
+    memberships {
+      id
+      role                 # OWNER | MANAGER | EMPLOYEE
+      joinedAt
+      business { id name heroPhotoUrl city }
+    }
+    customerProfile { id address city }
+  }
+}
+```
+
+Read it as **two independent facts**, never one:
+
+- **Staff?** → `memberships.length > 0`, and each entry carries its own `role`, so a user who is a
+  MANAGER at one business and an EMPLOYEE at another is represented correctly.
+- **Customer?** → `customerProfile != null`.
+
+**`memberships` being empty does not mean the user is a customer.** An owner created by
+`registerOwner` (which makes no `CustomerProfile`) and later soft-removed by `removeMember` has
+neither — check `customerProfile` on its own. A `User.isBusinessMember` boolean was considered for
+this and rejected precisely because it collapses the two facts into one and gets that case wrong.
+
+Which context to land in is a **client** decision — the API deliberately doesn't pick for you, so
+the context switcher in point 2 above is where that logic belongs. Re-run `getSession` after
+anything that changes a role.
+
+> `getMyBusinesses` still returns `[Business!]!` and still discards the role. It was left alone
+> rather than broken, since `getSession` covers the role-aware case. Use `getSession` whenever the
+> role matters.
+
+**Job lists are fetched per-screen, never bundled into `getSession`.** `getSession` is identity +
+roles only; each screen pulls its own filtered slice through `getBusinessJobs` (OWNER/MANAGER),
+`getMyJobs` (sitter), or `getMyBookings`/`getMyUpcomingJobs` (customer). The Home dashboard
+(`src/components/BusinessTodayDashboard.tsx`) is the first instance: it takes the `business.id`
+from a `getSession` membership and calls `getBusinessJobs` with `from`/`to` set to the **device's
+local** midnight-to-midnight, then derives its three headline counts client-side from that one
+result set (Jobs today / Unassigned / Cancelled today — see the component for the exact predicates).
+Compute the day window client-side, not server-side — the backend has
+no per-business timezone, so a server "current date" would be UTC and land wrong at the day's edges.
+Backend `AI_MANIFEST.md` §10 has the full rationale for why this deliberately stayed out of
+`getSession`.
 
 ---
 
 ## 9. Design System
 
-From `first_draft_screens.html` (the visual prototype at the repo root — open it in a browser; it
-is a self-contained bundle and cannot be usefully grepped).
+From `first_draft_screens.html` (the visual prototype at the root of `phone_app/`, not the git repo
+root — open it in a browser; it is a self-contained bundle and cannot be usefully grepped).
 
 | Token | Value |
 |-------|-------|
 | Background | `#F7F8F6` (near-white green) |
-| Primary | `#123524` (Phthalo green) |
+| Primary | `#0F1D1B` (Phthalo green) |
 | Accent | `#C08B2E` (warm honey — ratings, highlights) |
 | Card radius | 18px |
 | Headings | Sora |

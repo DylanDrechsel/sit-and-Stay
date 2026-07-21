@@ -1,4 +1,5 @@
 import { GraphQLError } from 'graphql';
+import { runGuardedTransition } from '../jobTransition.js';
 import type { GraphQLContext } from '../../../../types/context.js';
 
 /**
@@ -44,8 +45,14 @@ export const declineJob = async (
         });
     }
 
-    return context.prisma.job.update({
-        where: { id: jobId },
-        data: { status: 'DECLINED', declinedAt: new Date() },
-    });
+    // Guarded on the status just checked — see jobTransition.ts. The accept/
+    // decline race is the mirror of acceptJob's: PENDING is the one status both
+    // mutations start from, so it is the one they can take from each other.
+    return runGuardedTransition(
+        () => context.prisma.job.update({
+            where: { id: jobId, status: 'PENDING' },
+            data: { status: 'DECLINED', declinedAt: new Date() },
+        }),
+        'This request was already answered by someone else. Refresh to see its current status.',
+    );
 };
