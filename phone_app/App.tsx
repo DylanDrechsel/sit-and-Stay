@@ -1,20 +1,33 @@
+import { Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from '@expo-google-fonts/manrope';
+import { Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
+import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { WelcomeScreen } from './src/screens/auth/WelcomeScreen';
+import { colors } from './src/theme/colors';
 
 export default function App() {
+  // Every family referenced in src/theme/typography.ts has to be registered
+  // here, or Text silently falls back to the system font.
+  const [fontsLoaded] = useFonts({
+    Sora_700Bold,
+    Sora_800ExtraBold,
+    Manrope_500Medium,
+    Manrope_600SemiBold,
+    Manrope_700Bold,
+    Manrope_800ExtraBold,
+  });
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      {/* Hold on the brand colour rather than flashing white while fonts load. */}
+      {fontsLoaded ? (
+        <WelcomeScreen />
+      ) : (
+        <View style={{ flex: 1, backgroundColor: colors.primary }} />
+      )}
+      <StatusBar style="light" />
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
