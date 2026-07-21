@@ -16,7 +16,10 @@
 ## 1. Current Status — Read This First
 
 **Email/password auth works end to end: Welcome → Login → Home, with the Home screen rendering
-`getSession`.** Nothing beyond auth is built — no tabs, bookings, pets, or business screens.
+`getSession`.** Beyond auth, an OWNER/MANAGER sees a first read-only dashboard on Home — the "2A"
+Today view: today's date, the business name, and three headline counts (Jobs today / Unassigned /
+Cancelled today) over today's job list, all from `getBusinessJobs` (see the row below). No tabs,
+bookings, pets, or dedicated business screens yet.
 
 What exists today:
 
@@ -28,16 +31,20 @@ What exists today:
 | `tsconfig.json` | Extends `expo/tsconfig.base`, `strict: true` |
 | `.env` | **Gitignored** (repo-root `.gitignore`, bare `.env` entry). No `.env.example` is checked in — see §4. |
 | `src/lib/env.ts` | Reads + validates `EXPO_PUBLIC_API_URL`, throwing a useful message if unset. |
+| `src/lib/datetime.ts` | `formatToday()` / `formatTime()` — device-local date/time formatters shared by the home dashboard and job rows. |
 | `src/lib/tokenStorage.ts` | JWT get/set/clear. Branches on `Platform.OS` — SecureStore native, `localStorage` on web (§6). |
 | `src/lib/apolloClient.ts` | Apollo Client 4: auth link (reads token fresh per request) + error link (UNAUTHENTICATED → sign out). |
 | `src/context/AuthContext.tsx` | `token` / `isRestoring` / `signIn` / `signOut`. Restores the token on cold start and clears the Apollo store on sign-out. |
 | `src/navigation/RootNavigator.tsx` | Swaps auth stack ↔ app stack on `token`. Param lists exported. |
-| `src/graphql/auth.ts`, `src/graphql/session.ts` | `LOGIN` mutation, `GET_SESSION` query — both `TypedDocumentNode`. |
-| `src/types/session.ts` | Hand-written mirrors of the schema types. |
+| `src/graphql/auth.ts`, `src/graphql/session.ts`, `src/graphql/job.ts` | `LOGIN` mutation, `GET_SESSION` query, `GET_BUSINESS_JOBS` query — all `TypedDocumentNode`. |
+| `src/types/session.ts`, `src/types/job.ts` | Hand-written mirrors of the schema types (`session.ts` = User/Business/membership/profile; `job.ts` = the `BusinessJob` slice `GET_BUSINESS_JOBS` selects). |
 | `src/validation/auth.ts` | `loginSchema`, mirroring the backend field-for-field. |
 | `src/screens/auth/WelcomeScreen.tsx` | Landing screen. Apple/Google buttons are **deliberately inert `View`s** — the API has no OAuth mutation, and `login` rejects null-`passwordHash` accounts. "Continue with email" now navigates to Login. |
 | `src/screens/auth/LoginScreen.tsx` | Email/password form (React Hook Form + Zod). |
-| `src/screens/HomeScreen.tsx` | Renders `getSession`: name, badges, memberships with roles, customer profile. Pull-to-refresh + sign-out. |
+| `src/screens/HomeScreen.tsx` | Renders `getSession` and composes the home layout. For an OWNER/MANAGER it renders `<BusinessTodayDashboard>` per business run; EMPLOYEE-only staff get a compact "Also on staff at" list; customers get a compact profile line; everyone gets pull-to-refresh + sign-out. Screen-level only — the dashboard, stat boxes, and job rows are their own components now. |
+| `src/components/BusinessTodayDashboard.tsx` | The "2A" Today dashboard for one business: date + business name header, three `StatBox` counts (Jobs today / Unassigned / Cancelled today), and today's job list. Owns the `getBusinessJobs` `useQuery` (device local-day `from`/`to`) and derives the three counts client-side. One instance per business — its own query, so it isn't a hook called in a loop. |
+| `src/components/StatBox.tsx` | Presentational headline count — big number over a muted label; `tone` (`mint`/`plain`/`accent`) colours the number. |
+| `src/components/JobListItem.tsx` | Presentational single job row (number + service, status pill, time window, customer, sitter). Takes a `BusinessJob`, no fetching — reusable by any future job list. |
 | `src/theme/`, `src/components/PawMark.tsx` | Palette, font constants, logo mark. |
 
 Still **PLANNED**: `src/components/` beyond the logo mark, and every non-auth screen.
@@ -93,14 +100,19 @@ phone_app/
 ├── .env                         # gitignored — your local config; no .env.example checked in (§4)
 └── src/
     ├── components/
-    │   └── PawMark.tsx
+    │   ├── PawMark.tsx
+    │   ├── BusinessTodayDashboard.tsx  # the "2A" Today dashboard (owns getBusinessJobs)
+    │   ├── StatBox.tsx          # one headline count
+    │   └── JobListItem.tsx      # one job row (presentational)
     ├── context/
     │   └── AuthContext.tsx      # token state, signIn/signOut, cold-start restore
     ├── graphql/
     │   ├── auth.ts              # LOGIN
-    │   └── session.ts           # GET_SESSION
+    │   ├── session.ts           # GET_SESSION
+    │   └── job.ts               # GET_BUSINESS_JOBS
     ├── lib/
     │   ├── apolloClient.ts      # links: error -> auth -> http
+    │   ├── datetime.ts          # formatToday / formatTime (device-local)
     │   ├── env.ts               # validated EXPO_PUBLIC_* access
     │   └── tokenStorage.ts      # SecureStore, localStorage on web
     ├── navigation/
@@ -114,7 +126,8 @@ phone_app/
     │   ├── colors.ts
     │   └── typography.ts
     ├── types/
-    │   └── session.ts
+    │   ├── session.ts
+    │   └── job.ts
     └── validation/
         └── auth.ts
 ```
@@ -325,6 +338,18 @@ anything that changes a role.
 > `getMyBusinesses` still returns `[Business!]!` and still discards the role. It was left alone
 > rather than broken, since `getSession` covers the role-aware case. Use `getSession` whenever the
 > role matters.
+
+**Job lists are fetched per-screen, never bundled into `getSession`.** `getSession` is identity +
+roles only; each screen pulls its own filtered slice through `getBusinessJobs` (OWNER/MANAGER),
+`getMyJobs` (sitter), or `getMyBookings`/`getMyUpcomingJobs` (customer). The Home dashboard
+(`src/components/BusinessTodayDashboard.tsx`) is the first instance: it takes the `business.id`
+from a `getSession` membership and calls `getBusinessJobs` with `from`/`to` set to the **device's
+local** midnight-to-midnight, then derives its three headline counts client-side from that one
+result set (Jobs today / Unassigned / Cancelled today — see the component for the exact predicates).
+Compute the day window client-side, not server-side — the backend has
+no per-business timezone, so a server "current date" would be UTC and land wrong at the day's edges.
+Backend `AI_MANIFEST.md` §10 has the full rationale for why this deliberately stayed out of
+`getSession`.
 
 ---
 

@@ -11,8 +11,10 @@ import {
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BusinessTodayDashboard } from '../components/BusinessTodayDashboard';
 import { useAuth } from '../context/AuthContext';
 import { GET_SESSION } from '../graphql/session';
+import { formatToday } from '../lib/datetime';
 import { colors } from '../theme/colors';
 import { fonts } from '../theme/typography';
 import type { BusinessRole } from '../types/session';
@@ -59,11 +61,14 @@ export function HomeScreen() {
 
     const { user, memberships, customerProfile } = session;
 
-    // The two independent facts getSession exists to express. Note `isStaff` is
-    // derived from the membership list, and `isCustomer` from the profile —
-    // NOT from each other. A removed owner is neither, which is why this isn't
-    // an if/else. See src/types/session.ts.
-    const isStaff = memberships.length > 0;
+    // Owner/manager memberships drive the 2A dashboard; getBusinessJobs is gated
+    // to those two roles. EMPLOYEE-only staff and customers still need a foothold
+    // on this screen, so they're handled separately below. Staff-ness and
+    // customer-ness stay independent facts — see src/types/session.ts.
+    const managerMemberships = memberships.filter(
+        (m) => m.role === 'OWNER' || m.role === 'MANAGER',
+    );
+    const employeeMemberships = memberships.filter((m) => m.role === 'EMPLOYEE');
     const isCustomer = customerProfile != null;
 
     return (
@@ -81,73 +86,47 @@ export function HomeScreen() {
                 />
             }
         >
-            <Text style={styles.greeting}>Hi, {user.firstName}</Text>
-            <Text style={styles.email}>{user.email}</Text>
+            {managerMemberships.length > 0 ? (
+                // The 2A "Today" dashboard, one per business the caller runs.
+                managerMemberships.map((membership) => (
+                    <BusinessTodayDashboard
+                        key={membership.id}
+                        businessId={membership.business.id}
+                        businessName={membership.business.name}
+                    />
+                ))
+            ) : (
+                // Not an owner/manager — keep the date header for continuity, but
+                // greet by name instead of a business they don't run.
+                <>
+                    <Text style={styles.dateLabel}>{formatToday()}</Text>
+                    <Text style={styles.heading}>Hi, {user.firstName}</Text>
+                </>
+            )}
 
-            <View style={styles.badgeRow}>
-                {isStaff && (
-                    <View style={styles.badge}>
-                        <Text style={styles.badgeText}>Staff</Text>
-                    </View>
-                )}
-                {isCustomer && (
-                    <View style={[styles.badge, styles.badgeCustomer]}>
-                        <Text style={[styles.badgeText, styles.badgeCustomerText]}>Customer</Text>
-                    </View>
-                )}
-                {!isStaff && !isCustomer && (
-                    <View style={[styles.badge, styles.badgeNeutral]}>
-                        <Text style={[styles.badgeText, styles.badgeNeutralText]}>No active roles</Text>
-                    </View>
-                )}
-            </View>
-
-            <Text style={styles.sectionTitle}>
-                {memberships.length === 1 ? 'Your business' : 'Your businesses'}
-            </Text>
-
-            {isStaff ? (
-                memberships.map((membership) => (
-                    <View key={membership.id} style={styles.card}>
-                        <View style={styles.cardHeader}>
-                            <Text style={styles.cardTitle}>{membership.business.name}</Text>
+            {employeeMemberships.length > 0 && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionLabel}>Also on staff at</Text>
+                    {employeeMemberships.map((membership) => (
+                        <View key={membership.id} style={styles.staffRow}>
+                            <Text style={styles.staffName}>{membership.business.name}</Text>
                             <View style={styles.rolePill}>
                                 <Text style={styles.rolePillText}>{formatRole(membership.role)}</Text>
                             </View>
                         </View>
-                        {membership.business.city != null && (
-                            <Text style={styles.cardMeta}>{membership.business.city}</Text>
-                        )}
-                        <Text style={styles.cardMeta}>
-                            Joined {new Date(membership.joinedAt).toLocaleDateString()}
-                        </Text>
-                        {!membership.business.isActive && (
-                            <Text style={styles.cardWarning}>This business is deactivated</Text>
-                        )}
-                    </View>
-                ))
-            ) : (
-                <View style={styles.card}>
-                    <Text style={styles.cardMeta}>You're not a member of any business.</Text>
+                    ))}
                 </View>
             )}
 
-            <Text style={styles.sectionTitle}>Customer profile</Text>
-            <View style={styles.card}>
-                {isCustomer ? (
-                    <>
-                        <Text style={styles.cardTitle}>Active</Text>
-                        <Text style={styles.cardMeta}>
-                            {customerProfile.city ?? 'No city set'}
-                            {customerProfile.address != null ? ` · ${customerProfile.address}` : ''}
-                        </Text>
-                    </>
-                ) : (
-                    <Text style={styles.cardMeta}>
-                        No customer profile — this account can't book services yet.
+            {isCustomer && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionLabel}>Customer profile</Text>
+                    <Text style={styles.profileText}>
+                        {customerProfile.city ?? 'No city set'}
+                        {customerProfile.address != null ? ` · ${customerProfile.address}` : ''}
                     </Text>
-                )}
-            </View>
+                </View>
+            )}
 
             <Pressable onPress={() => void signOut()} style={styles.signOutButton}>
                 <Text style={styles.signOutLabel}>Sign out</Text>
@@ -168,105 +147,67 @@ const styles = StyleSheet.create({
     content: {
         paddingHorizontal: 24,
     },
-    greeting: {
+    // The non-owner/manager fallback header (customers, employee-only staff).
+    dateLabel: {
+        fontFamily: fonts.bodySemiBold,
+        fontSize: 14,
+        color: colors.onPrimary65,
+    },
+    heading: {
         fontFamily: fonts.headingBold,
         fontSize: 30,
         lineHeight: 35,
         letterSpacing: -0.45,
         color: colors.textOnPrimary,
-    },
-    email: {
-        fontFamily: fonts.bodyMedium,
-        fontSize: 14,
-        color: colors.onPrimary65,
         marginTop: 4,
     },
-    badgeRow: {
-        flexDirection: 'row',
-        gap: 8,
-        marginTop: 16,
+    // Secondary sections below the dashboard: "Also on staff at", customer profile.
+    section: {
+        marginTop: 14,
+        paddingTop: 14,
+        borderTopWidth: 1,
+        borderTopColor: colors.overlay20,
     },
-    badge: {
-        backgroundColor: 'rgba(127, 214, 160, 0.18)',
-        borderWidth: 1,
-        borderColor: 'rgba(127, 214, 160, 0.45)',
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 5,
-    },
-    badgeText: {
+    sectionLabel: {
         fontFamily: fonts.bodyExtraBold,
         fontSize: 11,
-        letterSpacing: 0.4,
-        color: colors.mint,
-    },
-    badgeCustomer: {
-        backgroundColor: 'rgba(192, 139, 46, 0.18)',
-        borderColor: 'rgba(192, 139, 46, 0.45)',
-    },
-    badgeCustomerText: {
-        color: colors.accent,
-    },
-    badgeNeutral: {
-        backgroundColor: colors.overlay10,
-        borderColor: colors.overlay20,
-    },
-    badgeNeutralText: {
-        color: colors.onPrimary65,
-    },
-    sectionTitle: {
-        fontFamily: fonts.bodyExtraBold,
-        fontSize: 12,
-        letterSpacing: 0.8,
+        letterSpacing: 0.6,
         textTransform: 'uppercase',
         color: colors.onPrimary45,
-        marginTop: 32,
-        marginBottom: 12,
     },
-    card: {
-        backgroundColor: colors.overlay10,
-        borderWidth: 1,
-        borderColor: colors.overlay20,
-        borderRadius: 18,
-        padding: 16,
-        marginBottom: 10,
-    },
-    cardHeader: {
+    staffRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 12,
+        gap: 8,
+        marginTop: 10,
     },
-    cardTitle: {
+    staffName: {
         flex: 1,
-        fontFamily: fonts.headingBold,
-        fontSize: 17,
+        fontFamily: fonts.bodyBold,
+        fontSize: 14,
         color: colors.textOnPrimary,
     },
     rolePill: {
-        backgroundColor: colors.mint,
+        backgroundColor: colors.overlay10,
+        borderWidth: 1,
+        borderColor: colors.overlay20,
         borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
     },
     rolePillText: {
         fontFamily: fonts.bodyExtraBold,
-        fontSize: 10,
-        letterSpacing: 0.5,
-        color: colors.primary,
-    },
-    cardMeta: {
-        fontFamily: fonts.bodyMedium,
-        fontSize: 13,
-        lineHeight: 19,
+        fontSize: 9,
+        letterSpacing: 0.4,
         color: colors.onPrimary65,
-        marginTop: 6,
     },
-    cardWarning: {
-        fontFamily: fonts.bodySemiBold,
+    profileText: {
+        fontFamily: fonts.bodyMedium,
         fontSize: 12,
-        color: colors.accent,
-        marginTop: 8,
+        lineHeight: 17,
+        color: colors.onPrimary65,
+        marginTop: 4,
     },
     errorTitle: {
         fontFamily: fonts.headingBold,
