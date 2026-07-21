@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "phone_app",
+    "slug": "phone_app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}
