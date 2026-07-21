@@ -26,7 +26,7 @@ What exists today:
 | `index.ts` | `registerRootComponent(App)` — standard, don't edit |
 | `app.json` | Expo config; `expo-font` registered under `plugins` |
 | `tsconfig.json` | Extends `expo/tsconfig.base`, `strict: true` |
-| `.env` / `.env.example` | `.env` is **gitignored** (repo-root `.gitignore`); `.env.example` is the tracked template. See §4. |
+| `.env` | **Gitignored** (repo-root `.gitignore`, bare `.env` entry). No `.env.example` is checked in — see §4. |
 | `src/lib/env.ts` | Reads + validates `EXPO_PUBLIC_API_URL`, throwing a useful message if unset. |
 | `src/lib/tokenStorage.ts` | JWT get/set/clear. Branches on `Platform.OS` — SecureStore native, `localStorage` on web (§6). |
 | `src/lib/apolloClient.ts` | Apollo Client 4: auth link (reads token fresh per request) + error link (UNAUTHENTICATED → sign out). |
@@ -90,9 +90,7 @@ phone_app/
 ├── app.json                     # Expo config (plugins: expo-font)
 ├── tsconfig.json                # extends expo/tsconfig.base, strict
 ├── AGENTS.md                    # read the SDK 57 docs before writing Expo code
-├── .env                         # gitignored — your local config
-├── .env.example                 # tracked template; copy to .env
-├── assets/                      # icons + splash
+├── .env                         # gitignored — your local config; no .env.example checked in (§4)
 └── src/
     ├── components/
     │   └── PawMark.tsx
@@ -150,9 +148,10 @@ subfolder per feature area, `graphql/` is grouped by domain.
 ## 4. Environment Variables
 
 **`.env` is gitignored** (by the repo-root `.gitignore`, which has a bare `.env` entry).
-**`.env.example` is the tracked template** — copy it to `.env` on a fresh clone, or the app throws a
-descriptive error from `src/lib/env.ts` on first load instead of failing with an opaque
-`undefined` URL.
+**There is no `.env.example` checked in** — on a fresh clone, create `.env` yourself with the
+variable below, or the app throws a descriptive error from `src/lib/env.ts` on first load instead
+of failing with an opaque `undefined` URL. (A tracked `.env.example` would remove this manual step
+— worth adding.)
 
 ```
 EXPO_PUBLIC_API_URL=http://localhost:4000/graphql
@@ -331,13 +330,13 @@ anything that changes a role.
 
 ## 9. Design System
 
-From `first_draft_screens.html` (the visual prototype at the repo root — open it in a browser; it
-is a self-contained bundle and cannot be usefully grepped).
+From `first_draft_screens.html` (the visual prototype at the root of `phone_app/`, not the git repo
+root — open it in a browser; it is a self-contained bundle and cannot be usefully grepped).
 
 | Token | Value |
 |-------|-------|
 | Background | `#F7F8F6` (near-white green) |
-| Primary | `#123524` (Phthalo green) |
+| Primary | `#0F1D1B` (Phthalo green) |
 | Accent | `#C08B2E` (warm honey — ratings, highlights) |
 | Card radius | 18px |
 | Headings | Sora |

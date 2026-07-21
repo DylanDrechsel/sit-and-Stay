@@ -1,5 +1,7 @@
 import { GraphQLError } from 'graphql';
 import { cancelJobSchema, formatZodError } from '../../../../utils/validate.js';
+import { runGuardedTransition } from '../jobTransition.js';
+import type { JobStatus } from '@prisma/client';
 import type { GraphQLContext } from '../../../../types/context.js';
 import type { CancelJobInput } from '../../../../types/booking.js';
 
@@ -21,11 +23,13 @@ import type { CancelJobInput } from '../../../../types/booking.js';
  * work a job asks a manager to reassign it — letting them cancel the
  * customer's booking outright is the wrong remedy.
  */
-const CANCELLABLE_BY_CUSTOMER = ['PENDING', 'ACCEPTED', 'ASSIGNED'];
-const CANCELLABLE_BY_BUSINESS = ['ACCEPTED', 'ASSIGNED', 'IN_PROGRESS'];
+// Typed as JobStatus rather than string so the set can be handed straight to
+// Prisma as the guard on the UPDATE below.
+const CANCELLABLE_BY_CUSTOMER: JobStatus[] = ['PENDING', 'ACCEPTED', 'ASSIGNED'];
+const CANCELLABLE_BY_BUSINESS: JobStatus[] = ['ACCEPTED', 'ASSIGNED', 'IN_PROGRESS'];
 
 /** Already-final. There is nothing left to call off. */
-const TERMINAL_STATUSES = ['COMPLETED', 'CANCELLED', 'DECLINED'];
+const TERMINAL_STATUSES: JobStatus[] = ['COMPLETED', 'CANCELLED', 'DECLINED'];
 
 /**
  * cancelJob
@@ -85,7 +89,7 @@ export const cancelJob = async (
         });
     }
 
-    const cancellable = new Set<string>();
+    const cancellable = new Set<JobStatus>();
     if (isJobCustomer) for (const status of CANCELLABLE_BY_CUSTOMER) cancellable.add(status);
     if (isBusinessManager) for (const status of CANCELLABLE_BY_BUSINESS) cancellable.add(status);
 
@@ -121,8 +125,17 @@ export const cancelJob = async (
     };
     if (reason !== undefined) updateData.cancellationReason = reason;
 
-    return context.prisma.job.update({
-        where: { id: jobId },
-        data: updateData,
-    });
+    // Guarded on the same set the check above used — see jobTransition.ts. The
+    // guard is a set rather than one status because what this caller may cancel
+    // from depends on their role, but the principle is identical: the job must
+    // still be in a state this caller was allowed to cancel from when the write
+    // actually lands. A job that reached IN_PROGRESS in the meantime is no
+    // longer the customer's to call off.
+    return runGuardedTransition(
+        () => context.prisma.job.update({
+            where: { id: jobId, status: { in: [...cancellable] } },
+            data: updateData,
+        }),
+        'This job changed status before it could be cancelled. Refresh to see where it stands.',
+    );
 };

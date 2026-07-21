@@ -58,6 +58,11 @@ in their dual role. `avgRating: 5`, `reviewCount: 1`.
 - Employee availability scheduling
 - Full job lifecycle — booking → accept/decline → assign → clock in/out → report card → review
 - Job cancellation — every legal combination of caller role (customer, owner/manager) and source job status, including a dual-role account
+- Job-transition race safety — `acceptJob`, `declineJob`, `assignSitter`, `clockIn`, and `cancelJob`
+  each guard their status-changing write against a concurrent caller (`job/jobTransition.ts`), closing
+  a gap where two racing callers could both pass the same pre-check and the loser's write would
+  silently vanish. Verified with four real concurrent-request race tests (separate backgrounded
+  processes, same method as the tip/payout races below) — see `TEST_DATA_AND_RESPONSES.md` §45.
 - Business membership management — removing a member, viewing inactive members
 - Employee pay & payouts — pay rate configuration, job-completion financials on both paths to
   `COMPLETED`, tips (including a real concurrent-request race test), earnings/ledger reads with

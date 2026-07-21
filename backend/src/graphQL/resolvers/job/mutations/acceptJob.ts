@@ -1,4 +1,5 @@
 import { GraphQLError } from 'graphql';
+import { runGuardedTransition } from '../jobTransition.js';
 import type { GraphQLContext } from '../../../../types/context.js';
 
 /**
@@ -44,8 +45,14 @@ export const acceptJob = async (
         });
     }
 
-    return context.prisma.job.update({
-        where: { id: jobId },
-        data: { status: 'ACCEPTED', acceptedAt: new Date() },
-    });
+    // Guarded on the status just checked — see jobTransition.ts. Two staff
+    // answering the same request at once would otherwise both report success,
+    // with whichever wrote last silently deciding the outcome.
+    return runGuardedTransition(
+        () => context.prisma.job.update({
+            where: { id: jobId, status: 'PENDING' },
+            data: { status: 'ACCEPTED', acceptedAt: new Date() },
+        }),
+        'This request was already answered by someone else. Refresh to see its current status.',
+    );
 };

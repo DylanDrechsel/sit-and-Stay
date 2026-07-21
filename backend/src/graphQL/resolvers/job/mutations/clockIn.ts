@@ -1,4 +1,5 @@
 import { GraphQLError } from 'graphql';
+import { runGuardedTransition } from '../jobTransition.js';
 import type { GraphQLContext } from '../../../../types/context.js';
 
 /**
@@ -49,8 +50,15 @@ export const clockIn = async (
         });
     }
 
-    return context.prisma.job.update({
-        where: { id: jobId },
-        data: { status: 'IN_PROGRESS', actualStartTime: new Date() },
-    });
+    // Guarded on the status just checked — see jobTransition.ts. Losing this
+    // race stranded the job: a clock-in landing after a cancel left it
+    // IN_PROGRESS, where clockOut rejects a CANCELLED job and completeJob won't
+    // take it either, so nothing could close it out.
+    return runGuardedTransition(
+        () => context.prisma.job.update({
+            where: { id: jobId, status: 'ASSIGNED' },
+            data: { status: 'IN_PROGRESS', actualStartTime: new Date() },
+        }),
+        'This job is no longer assigned to you — it may have been cancelled or reassigned. Refresh to see its current status.',
+    );
 };

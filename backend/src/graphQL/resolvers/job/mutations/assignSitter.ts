@@ -1,5 +1,6 @@
 import { GraphQLError } from 'graphql';
 import { assignSitterSchema, formatZodError } from '../../../../utils/validate.js';
+import { runGuardedTransition } from '../jobTransition.js';
 import type { GraphQLContext } from '../../../../types/context.js';
 import type { AssignSitterInput } from '../../../../types/booking.js';
 
@@ -56,8 +57,16 @@ export const assignSitter = async (
         });
     }
 
-    return context.prisma.job.update({
-        where: { id: jobId },
-        data: { assigneeId, status: 'ASSIGNED', assignedAt: new Date() },
-    });
+    // Guarded on the status just checked — see jobTransition.ts. This is the
+    // costliest of these races to lose: a customer cancelling an ACCEPTED job at
+    // the same moment a manager assigns it would leave the row ASSIGNED with a
+    // real assigneeId, dispatching a sitter to a job the customer was told was
+    // cancelled. The guard makes the assignment fail instead.
+    return runGuardedTransition(
+        () => context.prisma.job.update({
+            where: { id: jobId, status: 'ACCEPTED' },
+            data: { assigneeId, status: 'ASSIGNED', assignedAt: new Date() },
+        }),
+        'This job is no longer awaiting a sitter — it may have been cancelled or assigned by someone else. Refresh to see its current status.',
+    );
 };

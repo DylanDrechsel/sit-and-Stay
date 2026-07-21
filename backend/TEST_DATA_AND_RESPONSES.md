@@ -2929,3 +2929,102 @@ siblings).
   identically to the two already-proven siblings, so compounding them is very unlikely to interact
   in a surprising way.
 
+---
+
+## 45. Job-Transition Race Guard — `acceptJob` / `declineJob` / `assignSitter` / `clockIn` / `cancelJob`
+
+A code review of the job state machine found that these five mutations (unlike `clockOut`/
+`completeJob`/`addTip`) checked `Job.status` in JS and then wrote unconditionally — no transaction,
+no status condition on the `update()` itself. Two callers could both pass the same pre-check and the
+second write would win silently, with the loser's response describing a status that was never
+actually persisted. Fixed by adding `job/jobTransition.ts` (`runGuardedTransition`), which repeats
+the just-checked status (or, for `cancelJob`, the allowed-status set) as a condition on the `update()`
+`where` clause and converts the resulting Prisma `P2025` ("no row matched") into a `CONFLICT`
+GraphQLError. See `AI_MANIFEST.md` §10's state-machine note for the full rationale. This section
+tests that fix: first that ordinary single-caller behavior is unchanged, then that genuine concurrent
+races resolve correctly.
+
+### Normal-flow re-verification (sequential, no race)
+
+Re-ran each mutation's happy path against fresh bookings to confirm the added `where` guard doesn't
+reject a legitimate single-caller transition:
+
+| Mutation | Job | Result |
+|----------|-----|--------|
+| `acceptJob` | `3a63adaf-447e-4eca-9a91-d60a5f0baa31` | `ACCEPTED` |
+| `assignSitter` (same job, continuing the chain) | `3a63adaf-...` | `ASSIGNED`, `assigneeId: cc28c51f-...` |
+| `clockIn` (same job) | `3a63adaf-...` | `IN_PROGRESS` |
+| `declineJob` | `f677fb30-0601-4194-a136-fe6a334a1be2` | `DECLINED` |
+| `cancelJob` (customer, from `PENDING`) | `e52ae8df-fb47-4a79-b945-5038cf61cfe5` | `CANCELLED` |
+| `cancelJob` (owner, from `ACCEPTED`) | `522a6d4f-d6cd-4e77-9ba3-685d6ce5fdb2` | `CANCELLED` |
+| `clockIn` on a job with no assignee yet | `08dafcd8-7cd5-40ed-8be3-f78c5a9bb471` | `FORBIDDEN` — "This job has no assigned sitter." (unchanged pre-check, not the new guard) |
+
+All seven matched pre-fix behavior exactly.
+
+### Concurrency tests — genuine mutual-exclusion races
+
+Following the same methodology as 42.4/42.6 (two backgrounded shell processes hitting the same job at
+the same instant, no artificial delay — same-process `Promise.all` was tried first and did not
+reliably force real overlap; see Notes). Each race pairs two operations that cannot both legitimately
+win.
+
+| Race | Job | Winner | Loser | What caught the loser |
+|------|-----|--------|-------|------------------------|
+| A: `acceptJob` vs `declineJob`, same `PENDING` job | `a416922b-f31d-4de0-a63b-2b0a16ee775a` | accept → `ACCEPTED` | decline → `BAD_USER_INPUT` "This job cannot be declined from its current status (ACCEPTED)." | ordinary pre-check (accept's write had already landed) |
+| B: `assignSitter`(employee) vs `assignSitter`(manager), same `ACCEPTED` job | `e586cca2-249c-482c-b1c4-75de83531a10` | employee → `ASSIGNED`, `assigneeId: cc28c51f-...` | manager → error | **the new guard** — `CONFLICT` "This job is no longer awaiting a sitter — it may have been cancelled or assigned by someone else." |
+| C: `cancelJob`(customer) vs `cancelJob`(owner), same `ACCEPTED` job | `eaf3f039-6b3f-4509-9530-af784e372467` | customer → `CANCELLED` | owner → error | **the new guard** — `CONFLICT` "This job changed status before it could be cancelled." |
+| D: `clockIn` vs `clockIn`, same sitter, same `ASSIGNED` job, called twice | `ac6e854e-27c4-4c38-83ad-5812ec00cbf8` | first → `IN_PROGRESS`, `actualStartTime: ...22:26:01.327Z` | second → `BAD_USER_INPUT` "Cannot clock in from this job's current status (IN_PROGRESS)." | ordinary pre-check (first write had already landed) |
+
+All four: exactly one winner, final DB state matched the winner exactly, and the loser got a clean
+error rather than a silent overwrite or a corrupted row. B and C specifically exercised the new guard
+end-to-end (the loser's pre-check read the still-valid pre-race status, so only the guarded `where`
+on the `update()` itself caught it). A and D had the ordinary pre-check win the timing race instead —
+a legitimate possible outcome (means the winner's entire round trip, including its DB write,
+completed before the loser's initial read went out), not a gap: B and C prove the guard is there and
+correct for whenever the pre-check *doesn't* win that timing race.
+
+### Corrected finding: `assignSitter` vs `cancelJob` is not actually a race bug
+
+The original review flagged this pairing as the worst case — a customer's `cancelJob` racing a
+manager's `assignSitter` on the same `ACCEPTED` job, worried the cancellation could be silently lost.
+Tested directly (job `829aeb9e-5b1e-4be6-858f-e679f11170ab`): `assignSitter` ran first
+(`ASSIGNED`, `assigneeId: cc28c51f-...`), then the customer's `cancelJob` **also succeeded**
+(`CANCELLED`) — `assignedAt: ...22:14:37.260Z` and `cancelledAt: ...22:14:37.261Z`, 1ms apart. This
+is correct, not corruption: `CANCELLABLE_BY_CUSTOMER` deliberately includes `ASSIGNED` (`cancelJob.ts`
+— a customer may cancel `PENDING`/`ACCEPTED`/`ASSIGNED`), so a cancellation landing just after an
+assignment is a legitimate sequential operation, not two callers fighting over the same outcome.
+`assigneeId` was correctly retained on the cancelled row per `AI_MANIFEST.md`'s note that who was on
+the job still matters for history. The failure mode the guard actually prevents is the reverse
+ordering — `cancelJob` landing first would leave the job `CANCELLED`, and `assignSitter`'s guard
+(`where: { status: 'ACCEPTED' }`) would then correctly refuse to match a `CANCELLED` row, returning
+`CONFLICT` instead of dispatching a sitter to a cancelled booking. Race B above is the cleaner,
+unambiguous test of that same guard mechanism.
+
+### Key IDs
+
+| Role | Value |
+|------|-------|
+| Business | Puget Sound Pet Care — `eeed145f-246b-4c14-8b1a-246850d1ea8a` |
+| Offerings used | Cat Sitting Visits `fddafd5f-9e9a-49a4-aae3-82a0e6ee9820` ($22, normal-flow jobs); Dog Walking `ee6d47cc-d0d7-4358-bb56-1a42fccc0cae` ($25, race jobs A–D) |
+| Pet | Biscuit — `edf9db53-9c4a-4e98-8bcb-7361ca856856` |
+| Employee (assignee in most tests) | `cc28c51f-3c59-4c44-9cea-cf881b468533` |
+| Manager (second assignee, Race B only) | `68081d4b-8bf9-4099-b6ec-2806cf8b1c5a` |
+
+### Notes
+
+- 11 throwaway `Job`/`Booking` rows now exist in the dev DB from this pass (`job1`–`job7` above, plus
+  races A–D) — left as-is, consistent with how every prior section in this document accumulates test
+  data rather than cleaning up after itself.
+- The first attempt at the concurrency tests used Node's `fetch` with `Promise.all` in a single
+  script rather than separate OS processes. It produced a real result for `acceptJob` vs
+  `declineJob` but the two requests didn't overlap enough to exercise the guard specifically (same
+  outcome as Race A above — pre-check won). Switched to backgrounded `curl` processes (separate OS
+  processes, matching 42.4/42.6 exactly) for all four races logged here, which reliably produced
+  tighter overlap. Worth remembering for any future concurrency test from this codebase: same-process
+  `fetch`/`Promise.all` is not a reliable way to force two requests to overlap at the DB level, even
+  though it looks like it should.
+- Did not test a three-way race (e.g. `assignSitter` + `cancelJob` + a second `assignSitter` all on
+  one job at once) — the pairwise guarantees proven here (exactly one write survives, the guard
+  matches only a still-valid prior state) compose the same way regardless of how many losers there
+  are, since each guarded `update()` is independently atomic against the row, not against each other.
+
