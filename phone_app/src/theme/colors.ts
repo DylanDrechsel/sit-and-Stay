@@ -4,7 +4,7 @@
  */
 export const colors = {
   // Core
-  primary: '#123524', // Phthalo green — dark screens + primary buttons
+  primary: '#0F1D1B', // Phthalo green — dark screens + primary buttons
   background: '#F7F8F6', // near-white green — light screens
   surface: '#FFFFFF',
   accent: '#C08B2E', // warm honey — ratings, highlights
@@ -24,4 +24,10 @@ export const colors = {
   onPrimary45: 'rgba(242, 246, 241, 0.45)',
   overlay10: 'rgba(255, 255, 255, 0.1)',
   overlay20: 'rgba(255, 255, 255, 0.2)',
+
+  // OLD PRIMARY GREENS — kept here for reference, but not used in the app. The
+  // primary: '#123524', // Old Primary Green
+  // primary: '#172927', // Old Primary Green
+  // primary: '#0F1D1C', // Old Primary Green
+  // primary: '#0F1D19', // Old Primary Green
 } as const;

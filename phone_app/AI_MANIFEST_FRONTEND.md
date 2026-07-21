@@ -15,29 +15,35 @@
 
 ## 1. Current Status — Read This First
 
-**One static screen exists. There is no networking, navigation, auth, or state management yet.**
+**Email/password auth works end to end: Welcome → Login → Home, with the Home screen rendering
+`getSession`.** Nothing beyond auth is built — no tabs, bookings, pets, or business screens.
 
 What exists today:
 
 | Path | State |
 |------|-------|
-| `App.tsx` | Loads the six Sora/Manrope weights via `useFonts`, then renders `WelcomeScreen` directly. Holds on a brand-coloured `View` while fonts load rather than flashing white. |
+| `App.tsx` | Provider stack (`ApolloProvider` → `AuthProvider` → `SafeAreaProvider`), loads the six Sora/Manrope weights, then renders `RootNavigator`. |
 | `index.ts` | `registerRootComponent(App)` — standard, don't edit |
 | `app.json` | Expo config; `expo-font` registered under `plugins` |
 | `tsconfig.json` | Extends `expo/tsconfig.base`, `strict: true` |
-| `assets/` | Default icons/splash from the template |
-| `src/theme/colors.ts` | Design-system palette (§9) |
-| `src/theme/typography.ts` | Font-family constants. Every family here must also be registered in `App.tsx`'s `useFonts` call or `Text` silently falls back to the system font. |
-| `src/components/PawMark.tsx` | Logo mark |
-| `src/screens/auth/WelcomeScreen.tsx` | Sign-in landing screen. The Apple and Google buttons are **deliberately inert `View`s, not `Pressable`s** — the API has no OAuth mutation, and `login` rejects accounts with a null `passwordHash`, which is exactly what a social account would be. "Continue with email" takes an optional `onContinueWithEmail` prop that nothing passes yet. |
+| `.env` / `.env.example` | `.env` is **gitignored** (repo-root `.gitignore`); `.env.example` is the tracked template. See §4. |
+| `src/lib/env.ts` | Reads + validates `EXPO_PUBLIC_API_URL`, throwing a useful message if unset. |
+| `src/lib/tokenStorage.ts` | JWT get/set/clear. Branches on `Platform.OS` — SecureStore native, `localStorage` on web (§6). |
+| `src/lib/apolloClient.ts` | Apollo Client 4: auth link (reads token fresh per request) + error link (UNAUTHENTICATED → sign out). |
+| `src/context/AuthContext.tsx` | `token` / `isRestoring` / `signIn` / `signOut`. Restores the token on cold start and clears the Apollo store on sign-out. |
+| `src/navigation/RootNavigator.tsx` | Swaps auth stack ↔ app stack on `token`. Param lists exported. |
+| `src/graphql/auth.ts`, `src/graphql/session.ts` | `LOGIN` mutation, `GET_SESSION` query — both `TypedDocumentNode`. |
+| `src/types/session.ts` | Hand-written mirrors of the schema types. |
+| `src/validation/auth.ts` | `loginSchema`, mirroring the backend field-for-field. |
+| `src/screens/auth/WelcomeScreen.tsx` | Landing screen. Apple/Google buttons are **deliberately inert `View`s** — the API has no OAuth mutation, and `login` rejects null-`passwordHash` accounts. "Continue with email" now navigates to Login. |
+| `src/screens/auth/LoginScreen.tsx` | Email/password form (React Hook Form + Zod). |
+| `src/screens/HomeScreen.tsx` | Renders `getSession`: name, badges, memberships with roles, customer profile. Pull-to-refresh + sign-out. |
+| `src/theme/`, `src/components/PawMark.tsx` | Palette, font constants, logo mark. |
 
-Everything else below is **PLANNED**. There is no `src/lib/`, `src/graphql/`, `src/context/`,
-`src/navigation/`, `src/types/`, or `src/validation/` — no Apollo client, no token storage, no
-navigator. Check the filesystem before assuming any provider or helper exists.
+Still **PLANNED**: `src/components/` beyond the logo mark, and every non-auth screen.
 
-> **Sequencing decision (2026-07-21):** the backend is being finished and verified first; the app is
-> deliberately not being built out against it yet. Do not add screens, providers, or GraphQL
-> documents to `phone_app/` until that changes — see §8 for the one backend fix this depends on.
+> **Sequencing note:** the backend was finished and verified first (all 67 operations tested); the
+> app is now being built against it. Auth is the first slice.
 
 ---
 
@@ -79,50 +85,92 @@ Current (real):
 
 ```
 phone_app/
-├── App.tsx                      # useFonts + renders WelcomeScreen
+├── App.tsx                      # provider stack + useFonts + RootNavigator
 ├── index.ts                     # registerRootComponent, do not edit
 ├── app.json                     # Expo config (plugins: expo-font)
 ├── tsconfig.json                # extends expo/tsconfig.base, strict
 ├── AGENTS.md                    # read the SDK 57 docs before writing Expo code
+├── .env                         # gitignored — your local config
+├── .env.example                 # tracked template; copy to .env
 ├── assets/                      # icons + splash
 └── src/
     ├── components/
     │   └── PawMark.tsx
+    ├── context/
+    │   └── AuthContext.tsx      # token state, signIn/signOut, cold-start restore
+    ├── graphql/
+    │   ├── auth.ts              # LOGIN
+    │   └── session.ts           # GET_SESSION
+    ├── lib/
+    │   ├── apolloClient.ts      # links: error -> auth -> http
+    │   ├── env.ts               # validated EXPO_PUBLIC_* access
+    │   └── tokenStorage.ts      # SecureStore, localStorage on web
+    ├── navigation/
+    │   └── RootNavigator.tsx    # auth stack <-> app stack
     ├── screens/
+    │   ├── HomeScreen.tsx
     │   └── auth/
+    │       ├── LoginScreen.tsx
     │       └── WelcomeScreen.tsx
-    └── theme/
-        ├── colors.ts
-        └── typography.ts
+    ├── theme/
+    │   ├── colors.ts
+    │   └── typography.ts
+    ├── types/
+    │   └── session.ts
+    └── validation/
+        └── auth.ts
 ```
 
-**PLANNED** layout under `src/` — create these as you need them, not upfront:
+### ⚠️ Apollo Client 4 import paths differ from v3
 
-```
-src/
-├── components/                  # Shared presentational components
-├── context/                     # AuthContext, SessionContext (§8)
-├── graphql/                     # gql documents, grouped by domain
-├── lib/                         # apolloClient.ts, secureStore.ts
-├── navigation/                  # RootNavigator, per-role stacks, param lists
-├── screens/                     # One folder per feature area
-├── theme/                       # colors.ts, typography.ts
-├── types/                       # TS types mirroring GraphQL schema types
-└── validation/                  # Zod schemas mirroring backend validate.ts
-```
+Most Apollo examples online are v3 and **will not resolve** here. Verified against the installed
+`@apollo/client@4.2.7`:
+
+| Symbol | v4 import path |
+|--------|----------------|
+| `ApolloClient`, `ApolloLink`, `HttpLink`, `InMemoryCache`, `gql`, `TypedDocumentNode`, `NetworkStatus` | `@apollo/client` |
+| `ApolloProvider`, `useQuery`, `useMutation`, `useLazyQuery`, `useSuspenseQuery` | `@apollo/client/react` — **not** the root |
+| `SetContextLink` | `@apollo/client/link/context` |
+| `ErrorLink` | `@apollo/client/link/error` |
+| `CombinedGraphQLErrors` | `@apollo/client` (also `@apollo/client/errors`) |
+
+Two further v4 changes that bite:
+
+- **`SetContextLink` takes `(prevContext, operation)`** — v3's `setContext` took them the other way
+  round. Both still exist; `setContext`/`onError` are deprecated aliases.
+- **Errors are typed classes, not one `ApolloError`.** Check with `CombinedGraphQLErrors.is(error)`
+  before reading `error.errors[].extensions.code`.
+- `rxjs` is a required peer dependency (present transitively at 7.8.2). Don't remove it.
+
+The directory conventions above hold as the app grows: one folder per concern, `screens/` gets a
+subfolder per feature area, `graphql/` is grouped by domain.
 
 ---
 
 ## 4. Environment Variables
 
-`phone_app/.env`:
+**`.env` is gitignored** (by the repo-root `.gitignore`, which has a bare `.env` entry).
+**`.env.example` is the tracked template** — copy it to `.env` on a fresh clone, or the app throws a
+descriptive error from `src/lib/env.ts` on first load instead of failing with an opaque
+`undefined` URL.
 
 ```
 EXPO_PUBLIC_API_URL=http://localhost:4000/graphql
 ```
 
 **`EXPO_PUBLIC_*` variables are inlined into the JS bundle at build time.** They are readable by
-anyone with the app binary. Never put a secret, API key, or credential in one.
+anyone with the app binary — they exist for per-environment *config*, not secrecy. Never put a
+secret, API key, or credential in one. That's fine for everything this app needs: the API URL is
+public by definition, and the only credential it holds is the user's JWT, issued at runtime by
+`login` and kept in the device keychain (`src/lib/tokenStorage.ts`) — never in a build-time variable.
+
+Two consequences worth knowing:
+
+- **Metro only inlines statically-analysable references.** `process.env.EXPO_PUBLIC_API_URL` written
+  out literally works; a dynamic `process.env[name]` compiles and then resolves to `undefined` at
+  runtime. `src/lib/env.ts` is the single place that reads it.
+- **Env vars are read when the bundle is built**, so a Metro server that's already running won't pick
+  up an edited `.env`. Restart with `npx expo start -c`.
 
 Host resolution differs per platform — this is the single most common "it works on web but not my
 phone" cause:

@@ -36,7 +36,8 @@
       "Bash(curl -s -X POST http://localhost:4000/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3MDY1YTNmOS1hZWM2LTRkNjYtYTlmNS1lMDVjZjE4MzkyYWMiLCJlbWFpbCI6ImN1c3RvbWVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDY2MzUzNSwiZXhwIjoxNzg0NzQ5OTM1fQ.c2w-l2v4bQofYJfF1qPZx5AUonfBp5aGi00dXJ_F-Rk' -d '{\"query\":\"query { getMyUpcomingJobs\\(statuses: [\\\\\"CANCELLED\\\\\"]\\) { id status } }\"}')",
       "Bash(curl -s -X POST http://localhost:4000/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwYmZhZmYwMS03ZTJmLTRiNjAtODExYi0wNGI5OTA5Mjg1YWUiLCJlbWFpbCI6Im93bmVyLnRlc3QxQHBldHNpdHRlcnByby5kZXYiLCJnbG9iYWxSb2xlIjoiVVNFUiIsImlhdCI6MTc4NDY2MzU1MywiZXhwIjoxNzg0NzQ5OTUzfQ.i75EKFbl5oEBAyq0FmvJRpWShjvdG4BR1NS4jBsb2Us' -d '{\"query\":\"query { getMyUpcomingJobs { id } }\"}')",
       "Bash(curl -s -X POST http://localhost:4000/graphql -H \"Content-Type: application/json\" -d '{\"query\":\"query { getMyUpcomingJobs { id } }\"}')",
-      "Bash(curl -s -X POST http://localhost:4000/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"query\":\"query { getMyUpcomingJobs\\(from: \\\\\"not-a-date\\\\\"\\) { id } }\"}')"
+      "Bash(curl -s -X POST http://localhost:4000/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"query\":\"query { getMyUpcomingJobs\\(from: \\\\\"not-a-date\\\\\"\\) { id } }\"}')",
+      "Bash(awk '/^  type Job \\\\{/,/^  \\\\}/' src/graphQL/typeDefs.ts)"
     ]
   }
 }
