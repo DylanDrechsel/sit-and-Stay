@@ -18,7 +18,6 @@ const startApolloServer = async () => {
     const server = new ApolloServer({
         typeDefs,
         resolvers,
-        // Never leak server file paths/stack traces to clients, in any environment.
         includeStacktraceInErrorResponses: false,
     });
 
@@ -31,6 +30,7 @@ const startApolloServer = async () => {
         'https://studio.apollographql.com',
         'http://localhost:8000',
         'http://localhost:8080',
+        'http://localhost:8081'
     ];
 
     app.use(cors({
