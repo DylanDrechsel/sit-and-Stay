@@ -5,7 +5,7 @@
 export const colors = {
   // Core
   primary: '#0F1D1B', // Phthalo green — dark screens + primary buttons
-  background: '#F7F8F6', // near-white green — light screens
+  background: '#EFF1EE', // soft green-grey — light screens; white cards sit on top of it
   surface: '#FFFFFF',
   accent: '#C08B2E', // warm honey — ratings, highlights
 
@@ -16,6 +16,12 @@ export const colors = {
 
   // Accents used on the dark green
   mint: '#7FD6A0', // logo, "up next" dots, success states
+
+  // Light-theme surfaces, lines, and status — for white screens like the
+  // owner/manager home dashboard (2A). Distinct from the translucent whites
+  // below, which only read against the dark green.
+  border: '#E3E7E2', // hairline dividers, card/pill borders on light
+  danger: '#C0392B', // cancelled, destructive, alert (red)
 
   // Translucent whites, for layering on the dark green. React Native has no
   // color-mix, so these are written out rather than derived.

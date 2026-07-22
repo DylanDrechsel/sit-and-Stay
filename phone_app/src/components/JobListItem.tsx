@@ -40,7 +40,7 @@ export function JobListItem({ job }: { job: BusinessJob }) {
 
 const styles = StyleSheet.create({
     row: {
-        marginTop: 10,
+        marginTop: 14,
     },
     header: {
         flexDirection: 'row',
@@ -52,12 +52,14 @@ const styles = StyleSheet.create({
         flex: 1,
         fontFamily: fonts.bodyBold,
         fontSize: 14,
-        color: colors.textOnPrimary,
+        color: colors.text,
     },
     statusPill: {
-        backgroundColor: colors.overlay10,
+        // White, not a tinted fill: the page background is already the tint, so
+        // anything muted would read as no fill at all.
+        backgroundColor: colors.surface,
         borderWidth: 1,
-        borderColor: colors.overlay20,
+        borderColor: colors.border,
         borderRadius: 999,
         paddingHorizontal: 8,
         paddingVertical: 3,
@@ -66,13 +68,13 @@ const styles = StyleSheet.create({
         fontFamily: fonts.bodyExtraBold,
         fontSize: 9,
         letterSpacing: 0.4,
-        color: colors.onPrimary65,
+        color: colors.textMuted,
     },
     meta: {
         fontFamily: fonts.bodyMedium,
         fontSize: 12,
         lineHeight: 17,
-        color: colors.onPrimary65,
+        color: colors.textMuted,
         marginTop: 4,
     },
 });

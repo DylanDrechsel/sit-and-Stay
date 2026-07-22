@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "phone-app-static-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "4321", "../phone_app"],
+      "port": 4321
+    }
+  ]
+}

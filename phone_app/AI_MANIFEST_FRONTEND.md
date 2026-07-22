@@ -15,11 +15,14 @@
 
 ## 1. Current Status — Read This First
 
-**Email/password auth works end to end: Welcome → Login → Home, with the Home screen rendering
-`getSession`.** Beyond auth, an OWNER/MANAGER sees a first read-only dashboard on Home — the "2A"
-Today view: today's date, the business name, and three headline counts (Jobs today / Unassigned /
-Cancelled today) over today's job list, all from `getBusinessJobs` (see the row below). No tabs,
-bookings, pets, or dedicated business screens yet.
+**Email/password auth works end to end: Welcome → Login → a role-specific app.** With a token,
+`RootNavigator` hands off to `AppContainer`, which loads `getSession` once and routes to one of three
+apps — Owner/Manager, Employee, or Customer — each with its own stack and home screen (§8.1).
+
+Only the **Owner/Manager** home is real: the "2A" Today view on a light background — today's date,
+the business name, three headline counts (jobs today / unassigned / cancelled today), and today's job
+list, from `getBusinessJobs`. The Employee and Customer homes are deliberate **placeholders**: they
+render identity and say what isn't built, rather than faking data. No tabs yet.
 
 What exists today:
 
@@ -35,15 +38,25 @@ What exists today:
 | `src/lib/tokenStorage.ts` | JWT get/set/clear. Branches on `Platform.OS` — SecureStore native, `localStorage` on web (§6). |
 | `src/lib/apolloClient.ts` | Apollo Client 4: auth link (reads token fresh per request) + error link (UNAUTHENTICATED → sign out). |
 | `src/context/AuthContext.tsx` | `token` / `isRestoring` / `signIn` / `signOut`. Restores the token on cold start and clears the Apollo store on sign-out. |
-| `src/navigation/RootNavigator.tsx` | Swaps auth stack ↔ app stack on `token`. Param lists exported. |
+| `src/context/SessionContext.tsx` | Holds the loaded `getSession` result below `AppContainer`. `useSession()` (throws outside the provider, like `useAuth`) and `useActiveMembership()` — the latter is where the **one-business-per-user** assumption lives. |
+| `src/navigation/RootNavigator.tsx` | Swaps the auth stack ↔ `AppContainer` on `token`. Knows nothing about roles. Exports `AuthStackParamList` only — the signed-in side has one param list per role app. |
+| `src/navigation/AppContainer.tsx` | The signed-in entry point: loads `getSession` once (with loading/error/retry), resolves which app to render via the exported `resolveAppKind()`, and provides the session. Also renders the `none` state (no membership, no customer profile — reachable for a soft-removed owner). |
+| `src/navigation/OwnerManagerApp.tsx` | **Bottom tab bar** (`@react-navigation/bottom-tabs`): Today · Requests · Schedule · Team · Business · Account, with Ionicons. Route→icon lives in one `ICONS` map keyed off the param list, so a missing icon is a type error. Height and the bottom safe-area inset are left to React Navigation on purpose. |
+| `src/navigation/EmployeeApp.tsx`, `CustomerApp.tsx` | One stack each with its home screen and a typed param list. Still stacks; these become their own tab bars per §9. |
 | `src/graphql/auth.ts`, `src/graphql/session.ts`, `src/graphql/job.ts` | `LOGIN` mutation, `GET_SESSION` query, `GET_BUSINESS_JOBS` query — all `TypedDocumentNode`. |
 | `src/types/session.ts`, `src/types/job.ts` | Hand-written mirrors of the schema types (`session.ts` = User/Business/membership/profile; `job.ts` = the `BusinessJob` slice `GET_BUSINESS_JOBS` selects). |
 | `src/validation/auth.ts` | `loginSchema`, mirroring the backend field-for-field. |
 | `src/screens/auth/WelcomeScreen.tsx` | Landing screen. Apple/Google buttons are **deliberately inert `View`s** — the API has no OAuth mutation, and `login` rejects null-`passwordHash` accounts. "Continue with email" now navigates to Login. |
 | `src/screens/auth/LoginScreen.tsx` | Email/password form (React Hook Form + Zod). |
-| `src/screens/HomeScreen.tsx` | Renders `getSession` and composes the home layout. For an OWNER/MANAGER it renders `<BusinessTodayDashboard>` per business run; EMPLOYEE-only staff get a compact "Also on staff at" list; customers get a compact profile line; everyone gets pull-to-refresh + sign-out. Screen-level only — the dashboard, stat boxes, and job rows are their own components now. |
-| `src/components/BusinessTodayDashboard.tsx` | The "2A" Today dashboard for one business: date + business name header, three `StatBox` counts (Jobs today / Unassigned / Cancelled today), and today's job list. Owns the `getBusinessJobs` `useQuery` (device local-day `from`/`to`) and derives the three counts client-side. One instance per business — its own query, so it isn't a hook called in a loop. |
-| `src/components/StatBox.tsx` | Presentational headline count — big number over a muted label; `tone` (`mint`/`plain`/`accent`) colours the number. |
+| `src/screens/owner/OwnerHomeScreen.tsx` | The `Today` tab, and the only real owner screen. Owns the `getBusinessJobs` query (device local-day `from`/`to`), loading/error/retry, and pull-to-refresh; hands the jobs to `<BusinessTodayDashboard>`. Gets its business from `useActiveMembership()`. |
+| `src/screens/owner/AccountScreen.tsx` | Real but read-only: name, email, business, role, and sign-out — all from the session already in context, so it makes no query. Editing (`updateUser`/`changeEmail`/`changePassword`) isn't built. |
+| `src/screens/owner/{Requests,Schedule,Team,Business}Screen.tsx` | Placeholders via `<PlaceholderScreen>`, each naming the query that will back it. |
+| `src/screens/employee/EmployeeHomeScreen.tsx` | **Placeholder.** Name + which business they sit for, and a note that the sitter's job list (`getMyJobs`) isn't wired yet. Deliberately does not fall back to `getBusinessJobs`, which the API refuses an EMPLOYEE. |
+| `src/screens/customer/CustomerHomeScreen.tsx` | **Placeholder.** Name + address, and a note that upcoming bookings (`getMyUpcomingJobs`) aren't wired yet. |
+| `src/components/BusinessTodayDashboard.tsx` | The "2A" Today dashboard: date + business name header, three `StatBox` counts, today's job list. **Presentational** — the screen fetches and owns the jobs; this derives the three counts from them. |
+| `src/components/StatBox.tsx` | Presentational headline count. `variant` sets the whole box: `filled` (solid dark green, light text), `outline` (white, honey border), `danger` (white, red border + red number). |
+| `src/components/SignOutButton.tsx` | Shared by the owner Account tab, the employee/customer homes, and the `none` state. |
+| `src/components/PlaceholderScreen.tsx` | Standard "this tab isn't built yet" screen — a title and a note naming the query behind it. Deliberately not an empty list, which would be indistinguishable from a real query returning nothing. |
 | `src/components/JobListItem.tsx` | Presentational single job row (number + service, status pill, time window, customer, sitter). Takes a `BusinessJob`, no fetching — reusable by any future job list. |
 | `src/theme/`, `src/components/PawMark.tsx` | Palette, font constants, logo mark. |
 
@@ -101,11 +114,14 @@ phone_app/
 └── src/
     ├── components/
     │   ├── PawMark.tsx
-    │   ├── BusinessTodayDashboard.tsx  # the "2A" Today dashboard (owns getBusinessJobs)
-    │   ├── StatBox.tsx          # one headline count
-    │   └── JobListItem.tsx      # one job row (presentational)
+    │   ├── BusinessTodayDashboard.tsx  # the "2A" Today dashboard (presentational)
+    │   ├── StatBox.tsx          # one headline count (filled | outline | danger)
+    │   ├── JobListItem.tsx      # one job row (presentational)
+    │   ├── PlaceholderScreen.tsx # "not built yet" tab body
+    │   └── SignOutButton.tsx    # shared by every home screen
     ├── context/
-    │   └── AuthContext.tsx      # token state, signIn/signOut, cold-start restore
+    │   ├── AuthContext.tsx      # token state, signIn/signOut, cold-start restore
+    │   └── SessionContext.tsx   # getSession result; useSession / useActiveMembership
     ├── graphql/
     │   ├── auth.ts              # LOGIN
     │   ├── session.ts           # GET_SESSION
@@ -116,9 +132,23 @@ phone_app/
     │   ├── env.ts               # validated EXPO_PUBLIC_* access
     │   └── tokenStorage.ts      # SecureStore, localStorage on web
     ├── navigation/
-    │   └── RootNavigator.tsx    # auth stack <-> app stack
+    │   ├── RootNavigator.tsx    # auth stack <-> AppContainer, on token
+    │   ├── AppContainer.tsx     # loads getSession, picks the role app
+    │   ├── OwnerManagerApp.tsx  # bottom tab bar, 6 tabs
+    │   ├── EmployeeApp.tsx      # stack; tab bar later (§9)
+    │   └── CustomerApp.tsx      # stack; tab bar later (§9)
     ├── screens/
-    │   ├── HomeScreen.tsx
+    │   ├── owner/
+    │   │   ├── OwnerHomeScreen.tsx     # the "2A" Today tab (owns getBusinessJobs)
+    │   │   ├── AccountScreen.tsx       # real, read-only
+    │   │   ├── RequestsScreen.tsx      # placeholder
+    │   │   ├── ScheduleScreen.tsx      # placeholder
+    │   │   ├── TeamScreen.tsx          # placeholder
+    │   │   └── BusinessScreen.tsx      # placeholder
+    │   ├── employee/
+    │   │   └── EmployeeHomeScreen.tsx  # placeholder
+    │   ├── customer/
+    │   │   └── CustomerHomeScreen.tsx  # placeholder
     │   └── auth/
     │       ├── LoginScreen.tsx
     │       └── WelcomeScreen.tsx
@@ -300,6 +330,35 @@ Consequences for the app:
 3. Authorization is always re-checked server-side. Client-side role logic is for *presentation
    only*; never treat a hidden button as a security boundary.
 
+### 8.1 How the app routes on role — and the two simplifications it makes
+
+`RootNavigator` → (token) → `AppContainer` → one of `OwnerManagerApp` / `EmployeeApp` /
+`CustomerApp` → that role's home screen. `AppContainer` is the only place that queries `getSession`;
+everything below reads it synchronously via `useSession()`.
+
+`resolveAppKind(session)` (exported from `AppContainer.tsx`) is the whole decision:
+
+| Session shape | App |
+|---|---|
+| First membership is `OWNER` or `MANAGER` | Owner/Manager |
+| First membership is `EMPLOYEE` | Employee |
+| No membership, has a `CustomerProfile` | Customer |
+| Neither | `none` — an explanatory screen + sign out |
+
+**Two deliberate simplifications live here, and both contradict the role model above.** They are
+product choices, not facts about the API — write new code against the API's shape, not these:
+
+1. **One business per user.** `useActiveMembership()` returns `memberships[0]` and ignores the rest.
+   The API does not enforce this: `BusinessMember` is a junction table keyed `(userId, businessId)`
+   and `getSession` returns an array. A second membership is silently invisible in the UI.
+2. **Staff beats customer.** A user who is both lands in the staff app and cannot reach the customer
+   app at all. The `customer.test1` test account is exactly this case — an active MANAGER *and* a
+   customer — so it will open the Owner/Manager app, not the Customer one.
+
+Both are the same missing feature: the **active context switcher** in point 2 of the list above.
+Building it means replacing `resolveAppKind`'s automatic choice with a user-chosen context (and
+letting `useActiveMembership` take an id), not adding a role field to the API.
+
 ### ✅ Resolved: use `getSession` to build the session context
 
 **This is the query the session context should be built on.** One call after login returns
@@ -369,9 +428,12 @@ root — open it in a browser; it is a self-contained bundle and cannot be usefu
 
 Tab bars differ per role context:
 
-- **Customer:** Home · Bookings · Inbox · Pets · Account
-- **Owner/Manager:** Today · Requests · Schedule · Team · Account
-- **Employee/Sitter:** Today · Schedule · Earnings · Profile
+- **Customer:** Home · Bookings · Inbox · Pets · Account — **planned**
+- **Owner/Manager:** Today · Requests · Schedule · Team · Business · Account — **built**
+  (`OwnerManagerApp.tsx`; `Business` was added to the prototype's five). Only `Today` has a real
+  screen; the other four are `PlaceholderScreen`s naming the query behind them, and `Account` is
+  real but read-only.
+- **Employee/Sitter:** Today · Schedule · Earnings · Profile — **planned**
 
 All photos in the prototype are placeholders. See §11 — there is no upload mechanism behind any
 photo field.
