@@ -14,3 +14,21 @@ export const formatToday = (): string =>
 /** An ISO timestamp -> "9:00 AM". */
 export const formatTime = (iso: string): string =>
     new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+/** An ISO timestamp -> "Tue Jul 15" — for "starts <date>" copy on a request card. */
+export const formatShortDate = (iso: string): string =>
+    new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+
+/**
+ * How long ago an ISO timestamp was -> "18 min" or "3 hr". Computed once at
+ * render, not a live ticker — same call the rest of this file makes for
+ * "today", acceptable for an at-a-glance screen. `Job.respondBy` is advisory
+ * and nothing auto-expires a PENDING request (AI_MANIFEST.md), so a request
+ * can genuinely sit for hours or days — this must degrade past "min" rather
+ * than assume it never will.
+ */
+export const formatElapsedMinutes = (iso: string): string => {
+    const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
+    if (minutes < 60) return `${minutes} min`;
+    return `${Math.round(minutes / 60)} hr`;
+};
