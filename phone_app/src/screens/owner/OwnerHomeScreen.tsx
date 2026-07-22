@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BusinessTodayDashboard } from '../../components/BusinessTodayDashboard';
+import { NeedsAttentionSection } from '../../components/NeedsAttentionSection';
+import { OnDutySection } from '../../components/OnDutySection';
 import { useActiveMembership } from '../../context/SessionContext';
 import { GET_BUSINESS_JOBS } from '../../graphql/job';
 import { colors } from '../../theme/colors';
@@ -87,6 +89,8 @@ export function OwnerHomeScreen() {
                 businessName={business.name}
                 jobs={data?.getBusinessJobs ?? []}
             />
+            <NeedsAttentionSection businessId={business.id} />
+            <OnDutySection businessId={business.id} />
         </ScrollView>
     );
 }
